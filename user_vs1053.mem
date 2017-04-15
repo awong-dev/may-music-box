@@ -15,10 +15,17 @@ page 0:
 	ram_prog:  origin = 0x0050, length = 0x0fb0
 page 1:
 	#Data X RAM
-	data_x:   origin =  0x1800, length = 0x007f
+	int_data_x:   origin =  0x1800, length = 0x10
+	data_x:   origin =  0x1810, length = 0x006f
+	timer_config:   origin =  0xc030, length = 1
+	timer_enable:   origin =  0xc031, length = 1
+	timer_t0_values:   origin =  0xc034, length = 4
+	gpio_odata:   origin =  0xc019, length = 1
+	gpio_ddr:   origin =  0xc017, length = 1
 page 2:
 	#Data Y RAM
-	data_y:   origin =  0x1800, length = 0x007f
+	int_data_y:   origin =  0x1800, length = 0x10
+	data_y:   origin =  0x1810, length = 0x006f
 }
 
 CORE {
