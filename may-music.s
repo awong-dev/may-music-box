@@ -218,21 +218,25 @@ _int_timer0_pwm:
        //    - sampleTotal = 0
        //    - ledBrightness = newLedBrightness + ledBrightness >> 1, saturated to 255. [ Causes a 8-sample tail]
 __int_timer0_pwm_new_brightness:
-       lsl C,C
+       lsr C,C
        ldc -7, a0
-       ashl C,a0,C
+       ashl C,a0,C   // Do the 1/n.
+       ldc -24, a0   // TODO(awong): Remove
+       ashl C,a0,C   // TODO(awong): Remove
+       mv c0,a0
        // Calling convention is arg is in C and returns in A0
-       ldx (i6)+1,NULL
-       stx i7,(i6)+1
-       .import _SqrtI
-       call _SqrtI
-       nop
-       ldx (i6)-1,NULL
-       ldx (i6)-1,i7
+//       ldx (i6)+1,NULL
+//       stx i7,(i6)+1
+//       .import _SqrtI
+////       call _SqrtI
+//       nop
+//       ldx (i6)-1,NULL
+//       ldx (i6)-1,i7
 
        ldc MAX_LED,b0  // Restore pwm_tick.
-       lsr b1,b1       // Degrade ledBrightness
-       add b1,a0,b1    // Add ledBrightness to newLedBrightness.
+//       lsr b1,b1       // Degrade ledBrightness
+//       add b1,a0,b1    // Add ledBrightness to newLedBrightness.
+       mv a0, b1
        sub b1,b0,a0    // Decide if this needs saturation.
        nop
        jle __int_timer0_pwm_skip_saturate
@@ -248,19 +252,21 @@ __int_timer0_pwm_skip_saturate:
 __int_timer0_pwm_duty_cycle:
        stx b0,(i7) ; sty c2,(i7)-1  // Store _pwm_tick and _sample_total
        stx c0,(i7) ; sty c1,(i7)
+       ldc 0x0f,b1  // TODO(awong): Remove
        sub b1,b0,b0  // if _pwm_tick <= _led_brightness
        nop
        jle __int_timer0_pwm_duty_cycle_on
        nop
 
-__int_timer0_pwm_duty_cycle_on:
-       ldc ALL_LEDS,b0
-       j __int_timer0_pwm_write_led
-       nop
-
 __int_timer0_pwm_duty_cycle_off:
        ldc _led_force_on, i7
        ldy (i7), b0
+       ldc 0,b0  // TODO(awong): Remove
+       j __int_timer0_pwm_write_led
+       nop
+
+__int_timer0_pwm_duty_cycle_on:
+       ldc ALL_LEDS,b0
 
 __int_timer0_pwm_write_led:
        ldc GPIO_ODATA, i7
