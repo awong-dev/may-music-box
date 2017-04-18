@@ -6,7 +6,7 @@
 // Constants.
 // For reference, CLOCKF is 36864000
 #define ALL_LEDS 0xfc
-#define PWM_FREQ 128       // Pick a value that is power of 2 for easy root-mean-square calc.
+#define PWM_FREQ 255       // Pick a value that is power of 2 for easy root-mean-square calc.
 #define MAX_LED 0xff       // Value of fully on LED.
 
 // These values yield a PWM cycle length of about PWM_FREQ Hz.
@@ -44,7 +44,7 @@ _gpio_odata:
 _sample_total:
        .uword 0x0000    // _sample_total c0
 _pwm_tick:
-       .uword 0x0000
+       .uword MAX_LED
 
      .sect data_y,int_data_y
        .uword 0x0000    // _sample_total c1
@@ -190,7 +190,7 @@ _int_timer0_pwm:
        stx b0,(i6) ; sty b1,(i6)+1
        stx c0,(i6) ; sty c1,(i6)+1
        add null,p,c
-       stx c0,(i6) ; sty c1,(i6)+1
+       stx c0,(i6) ; sty c1,(i6)
 
        // Safe body.
        // Normally the jump to C is here.
@@ -205,54 +205,68 @@ _int_timer0_pwm:
        ldx (i7),c0 ; ldy (i7)+1,c1
        ldy (i7),c2
 
-       mac b0,b0,c ; ldx (i7)+1,b0    // Multiple and accumulate. Also load _pwm_tick.
+       macss b0,b0,c ; ldx (i7)+1,b0    // Multiple and accumulate. Also load _pwm_tick.
 
        // 2. Decrement tick by 1.
-       ldc 0x1, b1
+       add b0,ones,b0 ; ldy (i7),b1     // Load _led_brightness into b1
+       nop
        jzc __int_timer0_pwm_duty_cycle
-       sub b0,b1,b0 ; ldy (i7),b1     // Load _led_brightness into b1
+       nop
 
        // 3. If it equals zero:
        //    - newLedBrightness = sqrt(sampleTotal) scaled to PWM range.
        //    - sampleTotal = 0
        //    - ledBrightness = newLedBrightness + ledBrightness >> 1, saturated to 255. [ Causes a 8-sample tail]
 __int_timer0_pwm_new_brightness:
+       lsl C,C
+       ldc -7, a0
+       ashl C,a0,C
        // Calling convention is arg is in C and returns in A0
+       ldx (i6)+1,NULL
+       stx i7,(i6)+1
        .import _SqrtI
        call _SqrtI
+       nop
+       ldx (i6)-1,NULL
+       ldx (i6)-1,i7
 
-       asr b1,b1     // Degrade ledBrightness
-       add b1,a0,b1  // Add ledBrightness to newLedBrightness.
-       ldc MAX_LED,c1   
+       ldc MAX_LED,b0  // Restore pwm_tick.
+       lsr b1,b1       // Degrade ledBrightness
+       add b1,a0,b1    // Add ledBrightness to newLedBrightness.
+       sub b1,b0,a0    // Decide if this needs saturation.
+       nop
        jle __int_timer0_pwm_skip_saturate
-       sub b1,c1,a0
-       mv c1,b1      // Saturate at MAX_LED
+       xor C,C,C       // Clear _sample_total.
+       ldc MAX_LED,b1  // Saturate at MAX_LED
 
 __int_timer0_pwm_skip_saturate:
-       xor C,C,C
+       sty b1,(i7)-1                // Store _led_brightness
 
        // 4. if tick < ledBrightness.
        //    - Duty cycle on. Write ALL_LEDS
        //    - Duty cycle off. Write _led_force_on.
 __int_timer0_pwm_duty_cycle:
-       sty b1,(i7)-1                // Clear sampleTotal. Store _led_brightness
        stx b0,(i7) ; sty c2,(i7)-1  // Store _pwm_tick and _sample_total
        stx c0,(i7) ; sty c1,(i7)
+       sub b1,b0,b0  // if _pwm_tick <= _led_brightness
+       nop
        jle __int_timer0_pwm_duty_cycle_on
-       sub b0,b1,a0
+       nop
 
 __int_timer0_pwm_duty_cycle_on:
-       ldc ALL_LEDS,a0
-       j __int_timer0_pwm_end
+       ldc ALL_LEDS,b0
+       j __int_timer0_pwm_write_led
        nop
 
 __int_timer0_pwm_duty_cycle_off:
        ldc _led_force_on, i7
-       ldy (i7), a0
+       ldy (i7), b0
 
-__int_timer0_pwm_end:
+__int_timer0_pwm_write_led:
        ldc GPIO_ODATA, i7
-       stx a0,(i7) ; ldy (i6)-1,NULL
+       stx b0,(i7)
+
+__int_timer0_pwm_epilogue:
        ldx (i6),c0 ; ldy (i6)-1,c1
        resp c0,c1
        ldx (i6),c0 ; ldy (i6)-1,c1
