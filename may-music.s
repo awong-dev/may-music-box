@@ -195,9 +195,9 @@ __plugin_mode_switch_end:
 
 _int_timer0_pwm:
        sty i7,(i6) ; stx mr0,(i6)+1
-       stx lr0,(i6) ; sty a0,(i6)+1
-       stx a2,(i6) ; sty b2,(i6)+1
-       stx c2,(i6) ; sty d2,(i6)+1
+       stx i5,(i6) ; sty a0,(i6)+1
+       stx d2,(i6)+1
+       stx c2,(i6) ; sty b2,(i6)+1
        stx b0,(i6) ; sty b1,(i6)+1
        stx c0,(i6) ; sty c1,(i6)+1
        add null,p,c
@@ -207,15 +207,15 @@ _int_timer0_pwm:
        // 0. Snag sample.
        // 1. sampleTotal += Square sample
        ldc DAC_LEFT,i7
-       ldx (i7),b0
-       ldc _sample_total,i7
-       ldx (i7),c0 ; ldy (i7)+1,c1
-       ldy (i7),c2
+       ldx (i7),a0
+       ldc _sample_total,i5  // Use i5 for striped memory read of interrupt state.
+       ldx (i5),c0 ; ldy (i5)+1,c1
+       ldy (i5),c2
 
-       macss b0,b0,c ; ldx (i7)+1,b0    // Multiple and accumulate. Also load _pwm_tick.
+       macss a0,a0,c ; ldx (i5)+1,b0    // Multiple and accumulate. Also load _pwm_tick.
 
        // 2. Decrement tick by 1.
-       add b0,ones,b0 ; ldy (i7),b1     // Load _led_brightness into b1
+       add b0,ones,b0 ; ldy (i5),b1     // Load _led_brightness into b1
        nop
        jzc __int_timer0_pwm_duty_cycle
        nop
@@ -225,52 +225,51 @@ _int_timer0_pwm:
        //    - sampleTotal = 0
        //    - ledBrightness = newLedBrightness + ledBrightness >> 1, saturated to 255. [ Causes a 8-sample tail]
 __int_timer0_pwm_new_brightness:
+       // Do the 1/256 for rms calculation using lsr to treat C as unsigned.
        lsr C,C
        ldc -7, b0
-       ashl C,b0,C   // Do the 1/256.
-       // Calling convention is arg is in C and returns in A0
-       ldx (i6)+1,NULL
+       ashl C,b0,C
 
+       // Calling convention is arg is in C and returns in A0.
+       // Caller creates frame. Callee pops.
+       ldx (i6)+1,NULL
+       stx lr0,(i6)+1  // Note, this cannot be stored in the delay slot
+                       // because LR0 will already be clobbered.
        .import _SqrtI
        call _SqrtI
-       stx i7,(i6)+1
+       nop
+       xor C,C,C ; ldx (i6)-1,lr0  // Clear sample total and restore lr0.
 
-       ldx (i6)-1,i7
-
-       ldc -8,b0
+       // SqrtI return 16-bit result. Shift down for 8-bit PWM.
        lsr a0,a0
+       ldc -7,b0
        ashl a0,b0,a0
-       ldc (MAX_LED + 1),b0  // Restore pwm_tick.
-       lsr b1,b1       // Degrade ledBrightness
-       add b1,a0,b1    // Add ledBrightness to newLedBrightness.
-       sub b1,b0,a0    // Decide if this needs saturation.
+       lsr b1,b1             // Degrade ledBrightness
+       add b1,a0,b1          // Add ledBrightness to newLedBrightness.
+       ldc MAX_LED,b0        // Restore _pwm_tick for next cycle. Note, pwm_ticks is
+                             // effectively [1, 255] which means brightness 0 and 1 are both off.
+                             // That's probably not noticeable so whatevs.
+       sub b0,b1,a0          // Decide if this needs saturation.
        nop
        jle __int_timer0_pwm_skip_saturate
-       xor C,C,C       // Clear _sample_total.
+       nop
        ldc MAX_LED,b1  // Saturate at MAX_LED
 
 __int_timer0_pwm_skip_saturate:
-       sty b1,(i7)-1                // Store _led_brightness
+       sty b1,(i5)-1                // Store _led_brightness
 
        // 4. if tick < ledBrightness.
        //    - Duty cycle on. Write ALL_LEDS
        //    - Duty cycle off. Write _led_force_on.
 __int_timer0_pwm_duty_cycle:
-       stx b0,(i7) ; sty c2,(i7)-1  // Store _pwm_tick and _sample_total
-       stx c0,(i7) ; sty c1,(i7)
-       sub b1,b0,b0  // if _pwm_tick <= _led_brightness
-       nop
-       jle __int_timer0_pwm_duty_cycle_on
-       nop
+       stx b0,(i5) ; sty c2,(i5)-1  // Store _pwm_tick and _sample_total
+       sub b1,b0,b0  // if _pwm_tick < _led_brightness
+       stx c0,(i5) ; sty c1,(i5)
+       jlt __int_timer0_pwm_write_led
+       ldc ALL_LEDS,b0  // Duty cycle on.
 
-__int_timer0_pwm_duty_cycle_off:
-       ldc _led_force_on, i7
+       ldc _led_force_on, i7  // Duty cycle off.
        ldy (i7), b0
-       j __int_timer0_pwm_write_led
-       nop
-
-__int_timer0_pwm_duty_cycle_on:
-       ldc ALL_LEDS,b0
 
 __int_timer0_pwm_write_led:
        ldc GPIO_ODATA, i7
@@ -281,9 +280,9 @@ __int_timer0_pwm_epilogue:
        resp c0,c1
        ldx (i6),c0 ; ldy (i6)-1,c1
        ldx (i6),b0 ; ldy (i6)-1,b1
-       ldx (i6),c2 ; ldy (i6)-1,d2
-       ldx (i6),a2 ; ldy (i6)-1,b2
-       ldx (i6),lr0 ; ldy (i6)-1,a0
+       ldx (i6),c2 ; ldy (i6)-1,b2
+       ldx (i6)-1,d2
+       ldx (i6),i5 ; ldy (i6)-1,a0
        ldc INT_GLOB_ENA,i7
        ldx (i6),mr0
        reti
