@@ -6,12 +6,23 @@
 // Constants.
 // For reference, CLOCKF is 36864000
 #define ALL_LEDS 0xfc
-#define PWM_FREQ 255       // Pick a value that is power of 2 for easy root-mean-square calc.
 #define MAX_LED 0xff       // Value of fully on LED.
 
-// These values yield a PWM cycle length of about PWM_FREQ Hz.
-#define CLOCK_DIV 189
-#define TIMER_STOP_VAL 6   // CLOCKF / (CLOCK_DIV + 1) / MAX_LED / PWM_FREQ = ~ 6
+// CLOCKF / (CLOCK_DIV + 1) / MAX_LED / PWM_FREQ Hz = ~ 6
+//#define CLOCK_DIV 189
+//#define TIMER_STOP_VAL 6   
+
+// PWM_FREQ = 1000
+//#define CLOCK_DIV 28
+//#define TIMER_STOP_VAL 5
+
+// PWM_FREQ = 500
+#define CLOCK_DIV 28
+#define TIMER_STOP_VAL 10
+
+// PWM_FREQ = 3000
+//#define CLOCK_DIV 11
+//#define TIMER_STOP_VAL 4   // CLOCKF / (CLOCK_DIV + 1) / MAX_LED / 256 Hz = ~ 2
 
      // GPIO Setup.
      .sect data_x,gpio_odata
@@ -184,19 +195,15 @@ __plugin_mode_switch_end:
 
 _int_timer0_pwm:
        sty i7,(i6) ; stx mr0,(i6)+1
-       stx a0,(i6) ; sty lr0,(i6)+1
+       stx lr0,(i6) ; sty a0,(i6)+1
        stx a2,(i6) ; sty b2,(i6)+1
        stx c2,(i6) ; sty d2,(i6)+1
        stx b0,(i6) ; sty b1,(i6)+1
        stx c0,(i6) ; sty c1,(i6)+1
        add null,p,c
        stx c0,(i6) ; sty c1,(i6)
+       LDC 0x200,mr0  // We can accumulate 256 samples without overflow of 40 bits so no need for saturation mode.
 
-       // Safe body.
-       // Normally the jump to C is here.
-
-       LDC 0x200,mr0  // We can accumulate 127 samples without overflow of 40 bits so no need for saturation mode.
-       
        // 0. Snag sample.
        // 1. sampleTotal += Square sample
        ldc DAC_LEFT,i7
@@ -219,24 +226,25 @@ _int_timer0_pwm:
        //    - ledBrightness = newLedBrightness + ledBrightness >> 1, saturated to 255. [ Causes a 8-sample tail]
 __int_timer0_pwm_new_brightness:
        lsr C,C
-       ldc -7, a0
-       ashl C,a0,C   // Do the 1/n.
-       ldc -24, a0   // TODO(awong): Remove
-       ashl C,a0,C   // TODO(awong): Remove
+       //ldc -7, b0
+       ldc -23, b0
+       ashl C,b0,C   // Do the 1/256.
        mv c0,a0
        // Calling convention is arg is in C and returns in A0
 //       ldx (i6)+1,NULL
-//       stx i7,(i6)+1
-//       .import _SqrtI
-////       call _SqrtI
-//       nop
-//       ldx (i6)-1,NULL
-//       ldx (i6)-1,i7
 
-       ldc MAX_LED,b0  // Restore pwm_tick.
-//       lsr b1,b1       // Degrade ledBrightness
-//       add b1,a0,b1    // Add ledBrightness to newLedBrightness.
-       mv a0, b1
+ //      .import _SqrtI
+ //      call _SqrtI
+//       stx i7,(i6)+1
+
+  //     ldx (i6)-1,i7
+
+       ldc -8,b0
+       lsr a0,a0
+       ashl a0,b0,a0
+       ldc (MAX_LED + 1),b0  // Restore pwm_tick.
+       lsr b1,b1       // Degrade ledBrightness
+       add b1,a0,b1    // Add ledBrightness to newLedBrightness.
        sub b1,b0,a0    // Decide if this needs saturation.
        nop
        jle __int_timer0_pwm_skip_saturate
@@ -252,7 +260,6 @@ __int_timer0_pwm_skip_saturate:
 __int_timer0_pwm_duty_cycle:
        stx b0,(i7) ; sty c2,(i7)-1  // Store _pwm_tick and _sample_total
        stx c0,(i7) ; sty c1,(i7)
-       ldc 0x0f,b1  // TODO(awong): Remove
        sub b1,b0,b0  // if _pwm_tick <= _led_brightness
        nop
        jle __int_timer0_pwm_duty_cycle_on
@@ -261,7 +268,6 @@ __int_timer0_pwm_duty_cycle:
 __int_timer0_pwm_duty_cycle_off:
        ldc _led_force_on, i7
        ldy (i7), b0
-       ldc 0,b0  // TODO(awong): Remove
        j __int_timer0_pwm_write_led
        nop
 
@@ -279,7 +285,7 @@ __int_timer0_pwm_epilogue:
        ldx (i6),b0 ; ldy (i6)-1,b1
        ldx (i6),c2 ; ldy (i6)-1,d2
        ldx (i6),a2 ; ldy (i6)-1,b2
-       ldx (i6),a0 ; ldy (i6)-1,lr0
+       ldx (i6),lr0 ; ldy (i6)-1,a0
        ldc INT_GLOB_ENA,i7
        ldx (i6),mr0
        reti
