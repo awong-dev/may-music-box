@@ -226,18 +226,16 @@ _int_timer0_pwm:
        //    - ledBrightness = newLedBrightness + ledBrightness >> 1, saturated to 255. [ Causes a 8-sample tail]
 __int_timer0_pwm_new_brightness:
        lsr C,C
-       //ldc -7, b0
-       ldc -23, b0
+       ldc -7, b0
        ashl C,b0,C   // Do the 1/256.
-       mv c0,a0
        // Calling convention is arg is in C and returns in A0
-//       ldx (i6)+1,NULL
+       ldx (i6)+1,NULL
 
- //      .import _SqrtI
- //      call _SqrtI
-//       stx i7,(i6)+1
+       .import _SqrtI
+       call _SqrtI
+       stx i7,(i6)+1
 
-  //     ldx (i6)-1,i7
+       ldx (i6)-1,i7
 
        ldc -8,b0
        lsr a0,a0
