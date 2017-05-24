@@ -231,10 +231,13 @@ __int_timer0_pwm_new_brightness:
        ldc DAC_LEFT,i7
        ldx (i7),a0
 
-       lsr a0,a0
+       abs a0,a0
        ldc -6,b0
        ashl a0,b0,b1
        ldc MAX_LED,b0          // Restore _pwm_tick for next cycle. Note, pwm_ticks is
+
+
+__int_timer0_pwm_no_saturate:
        ldc _led_brightness,i7
 
        // Check duty cycle.
@@ -243,7 +246,7 @@ __int_timer0_pwm_new_brightness:
        //    - Duty cycle on. Write ALL_LEDS
        //    - Duty cycle off. Write _led_force_on.
 __int_timer0_pwm_duty_cycle:
-       sub b1,b0,a0  // if _pwm_tick < _led_brightness
+       sub b0,b1,a0  // if _pwm_tick < _led_brightness
        stx b0,(i7) ; sty b1,(i7) // _pwm_tick and Store _led_brightnes
        jlt __int_timer0_pwm_write_led  // TODO(awong): Check boundary.
        ldc ALL_LEDS,b0  // Duty cycle on.
