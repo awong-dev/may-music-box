@@ -68,14 +68,10 @@ _gpio_odata:
       // Parallel memory regions on x/y bus on the interrupt for stripepd
       // access to variables. Ensure memory map loads them to the same address!
      .sect data_x,int_data_x
-_sample_total:
-       .uword 0x0000    // _sample_total c0
 _pwm_tick:
        .uword MAX_LED
 
      .sect data_y,int_data_y
-       .uword 0x0000    // _sample_total c1
-       .uword 0x0000    // _sample_total c2
 _led_brightness:
        .uword 0x0000          
 
@@ -219,66 +215,36 @@ _int_timer0_pwm:
        stx c0,(i6) ; sty c1,(i6)
        LDC 0x200,mr0  // We can accumulate 256 samples without overflow of 40 bits so no need for saturation mode.
 
-       // 0. Snag sample.
-       // 1. sampleTotal += Square sample
-       ldc DAC_LEFT,i7
-       ldx (i7),a0
-       ldc _sample_total,i7
-       ldx (i7),c0 ; ldy (i7)+1,c1
-       ldy (i7),c2
+       // Load _pwm_tick and _led_brightness
+       ldc _pwm_tick,i7
+       ldx (i7),b0 ; ldy (i7),b1
 
-       macss a0,a0,c ; ldx (i7)+1,b0    // Multiple and accumulate. Also load _pwm_tick.
-
-       // 2. Decrement tick by 1.
-       add b0,ones,b0 ; ldy (i7),b1     // Load _led_brightness into b1
+       // Decrement tick by 1.
+       add b0,ones,b0
        nop
        jzc __int_timer0_pwm_duty_cycle
        nop
 
-       // 3. If it equals zero:
-       //    - newLedBrightness = sqrt(sampleTotal) scaled to PWM range.
-       //    - sampleTotal = 0
-       //    - ledBrightness = newLedBrightness + ledBrightness >> 1, saturated to 255. [ Causes a 8-sample tail]
+       // If tick hits zero, grab sample.
 __int_timer0_pwm_new_brightness:
-       // Do the 1/256 for rms calculation using lsr to treat C as unsigned.
-       lsr C,C
-       ldc -7, b0
-       ashl C,b0,C
+       // Snag sample.
+       ldc DAC_LEFT,i7
+       ldx (i7),a0
 
-       // Calling convention is arg is in C and returns in A0.
-       // Caller creates frame. Callee pops.
-       ldx (i6)+1,NULL
-       stx lr0,(i6) ; sty i7,(i6)+1  // Note, this cannot be stored in the delay slot
-                                     // because LR0 will already be clobbered.
-       .import _SqrtI
-       call _SqrtI
-       nop
-       xor C,C,C ; ldx (i6),lr0     // Clear sample total and reload link register.
-
-       // SqrtI return 16-bit result. Shift down for 8-bit PWM.
-       lsr a0,a0 ; ldy (i6)-1,i7   // Also restore i7.
+       lsr a0,a0
        ldc -6,b0
        ashl a0,b0,b1
-       // TODO(awong): This is dumb unless we actually accumulate in a0 from prev or something.
-       ldc MAX_LED,b0        // Restore _pwm_tick for next cycle. Note, pwm_ticks is
-                             // effectively [1, 255] which means brightness 0 and 1 are both off.
-                             // That's probably not noticeable so whatevs.
-       sub b0,b1,a0          // Decide if this needs saturation.
-       nop
-       jle __int_timer0_pwm_skip_saturate
-       nop
-       ldc MAX_LED,b1  // Saturate at MAX_LED
+       ldc MAX_LED,b0          // Restore _pwm_tick for next cycle. Note, pwm_ticks is
+       ldc _led_brightness,i7
 
-__int_timer0_pwm_skip_saturate:
-       sty b1,(i7)-1                // Store _led_brightness
-
-       // 4. if tick < ledBrightness.
+       // Check duty cycle.
+       //   TODO(awong): you have an off-by-one.
+       //   if tick[1,255] < ledBrightness [0,255].
        //    - Duty cycle on. Write ALL_LEDS
        //    - Duty cycle off. Write _led_force_on.
 __int_timer0_pwm_duty_cycle:
-       stx b0,(i7) ; sty c2,(i7)-1  // Store _pwm_tick and _sample_total
-       sub b1,b0,b0  // if _pwm_tick < _led_brightness
-       stx c0,(i7) ; sty c1,(i7)
+       sub b1,b0,a0  // if _pwm_tick < _led_brightness
+       stx b0,(i7) ; sty b1,(i7) // _pwm_tick and Store _led_brightnes
        jlt __int_timer0_pwm_write_led  // TODO(awong): Check boundary.
        ldc ALL_LEDS,b0  // Duty cycle on.
 
