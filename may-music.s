@@ -21,8 +21,8 @@
 //#define TIMER_STOP_VAL 10
 
 // PWM_FREQ = 300
-//#define CLOCK_DIV 47
-//#define TIMER_STOP_VAL 10
+#define CLOCK_DIV 47
+#define TIMER_STOP_VAL 10
 
 // PWM_FREQ = 100
 //#define CLOCK_DIV 47
@@ -33,8 +33,8 @@
 //#define TIMER_STOP_VAL 500
 
 // PWM_FREQ = 1.5
-#define CLOCK_DIV 47
-#define TIMER_STOP_VAL 15000
+//#define CLOCK_DIV 47
+//#define TIMER_STOP_VAL 15000
 
 // PWM_FREQ = 3000
 //#define CLOCK_DIV 11
@@ -279,7 +279,7 @@ __int_timer0_pwm_duty_cycle:
        stx b0,(i7) ; sty c2,(i7)-1  // Store _pwm_tick and _sample_total
        sub b1,b0,b0  // if _pwm_tick < _led_brightness
        stx c0,(i7) ; sty c1,(i7)
-       jle __int_timer0_pwm_write_led  // TODO(awong): Check boundary.
+       jlt __int_timer0_pwm_write_led  // TODO(awong): Check boundary.
        ldc ALL_LEDS,b0  // Duty cycle on.
 
        ldc _led_force_on, i7  // Duty cycle off.
