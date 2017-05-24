@@ -233,9 +233,23 @@ __int_timer0_pwm_new_brightness:
 
        abs a0,a0
        ldc -6,b0
-       ashl a0,b0,b1
+       ashl a0,b0,a0
+	  sub a0,b1,b0
+	  nop
+	  jge __int_timer0_pwm_new_peak
+	  nop
+	  lsr b1,a0  // No new peak. Just degrade.
+
+__int_timer0_pwm_new_peak:
+	  mv a0,b1   // Assume new peak found.
        ldc MAX_LED,b0          // Restore _pwm_tick for next cycle. Note, pwm_ticks is
 
+	  // Saturate
+	  sub b1,b0,a0
+	  nop
+	  jlt __int_timer0_pwm_no_saturate
+	  nop
+	  ldc MAX_LED,b1
 
 __int_timer0_pwm_no_saturate:
        ldc _led_brightness,i7
