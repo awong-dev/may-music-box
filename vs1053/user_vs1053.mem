@@ -1,0 +1,34 @@
+MEMORY {
+page 0:
+	#Program RAM
+	#reset: origin = 0x0, length = 2
+	dac_int: origin = 0x20, length = 1
+	sci_int: origin = 0x21, length = 1
+	sdi_int: origin = 0x22, length = 1
+	modu_int: origin = 0x23, length = 1
+	tx_int: origin = 0x24, length = 1
+	rx_int: origin = 0x25, length = 1
+	tim0_int: origin = 0x26, length = 1
+	tim1_int: origin = 0x27, length = 1
+	src_int: origin = 0x28, length = 1
+	sdm_int: origin = 0x29, length = 1
+	ram_prog:  origin = 0x0050, length = 0x0fb0
+page 1:
+	#Data X RAM
+	int_data_x:   origin =  0x1800, length = 0x10
+	data_x:   origin =  0x1810, length = 0x006f
+	timer_config:   origin =  0xc030, length = 1
+	timer_enable:   origin =  0xc031, length = 1
+	timer_t0_values:   origin =  0xc034, length = 4
+	gpio_odata:   origin =  0xc019, length = 1
+	gpio_ddr:   origin =  0xc017, length = 1
+page 2:
+	#Data Y RAM
+	int_data_y:   origin =  0x1800, length = 0x10
+	data_y:   origin =  0x1810, length = 0x006f
+}
+
+CORE {
+	frequency = 12.288MHz
+	bootaddr = 0x4000
+}
