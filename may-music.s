@@ -213,7 +213,7 @@ _int_timer0_pwm:
        stx c0,(i6) ; sty c1,(i6)+1
        add null,p,c
        stx c0,(i6) ; sty c1,(i6)
-       LDC 0x200,mr0  // We can accumulate 256 samples without overflow of 40 bits so no need for saturation mode.
+       LDC 0x600,mr0  // Saturate so we can subtract without going negative.
 
        // Load _pwm_tick and _led_brightness
        ldc _pwm_tick,i7
@@ -232,13 +232,17 @@ __int_timer0_pwm_new_brightness:
        ldx (i7),a0
 
        abs a0,a0
-       ldc -6,b0
+       ldc -7,b0
        ashl a0,b0,a0
 	  sub a0,b1,b0
 	  nop
 	  jge __int_timer0_pwm_new_peak
 	  nop
-	  lsr b1,a0  // No new peak. Just degrade.
+	  // No new peak. Just degrade. Dropping by 3 takes
+	  // 100 ticks to fully degrade which for 300Hz pwm is about
+	  // 3 Hz..close to the VU-meter fall-off..
+	  ldc 3,a0
+	  sub b1,a0,a0
 
 __int_timer0_pwm_new_peak:
 	  mv a0,b1   // Assume new peak found.
