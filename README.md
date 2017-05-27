@@ -18,3 +18,6 @@ on them. :)
   * Arduino sketch for the MCU that handles the input buttons and playback.
   * vdsp4 assembly code for handling mono downmix, and LED pulsing in of the VS1053b chip
   * Eagle files for the contol PCB.
+
+## Quirks
+  * There is a fork of the Adafruit vs1053b library. The mainline library has (multiple) synchronization bugs that lead to corrupted state. This fork fixes the major ones. Remove once upstream merges the fixes.
