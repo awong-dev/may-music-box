@@ -25,7 +25,7 @@
 #include <avr/power.h>
 #include <avr/sleep.h>
 
-#define NDEBUG 1
+#define NDEBUG 0
 #define DEV_BOARD 0
 
 
