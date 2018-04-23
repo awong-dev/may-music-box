@@ -25,19 +25,19 @@
 #include <avr/power.h>
 #include <avr/sleep.h>
 
-#define NDEBUG 0
+//#define NDEBUG 0
 #define DEV_BOARD 0
 
 
 #if DEV_BOARD == 0
 // These are the pins used for the music maker breakout
-#  define VS1053bRESET  7      // VS1053 reset pin
-#  define VS1053bCS     6      // VS1053 chip select pin (output)
+#  define VS1053bRESET  8      // VS1053 reset pin
+#  define VS1053bCS     7      // VS1053 chip select pin (output)
 #  define VS1053bDCS    4      // VS1053 Data/command select pin (output)
-#  define VS1053bPOWER  8      // PFET that disables VCC to shield.
+#  define VS1053bPOWER  9      // PFET that disables VCC to shield.
 
 // These are common pins between breakout and shield
-#  define CARDCS 5     // Card chip select pin
+#  define CARDCS 6     // Card chip select pin
 
 // DREQ should be an Int pin, see http://arduino.cc/en/Reference/attachInterrupt
 #  define DREQ 2       // VS1053 Data request, ideally an Interrupt pin
@@ -72,6 +72,21 @@
 #  define DEBUG_PRINTLN(x, args...) Serial.println(x, ##args)
 #endif
 
+Adafruit_VS1053_FilePlayer musicPlayer =
+  Adafruit_VS1053_FilePlayer(VS1053bRESET, VS1053bCS, VS1053bDCS, DREQ, CARDCS);
+static boolean isDspOn = false;
+static volatile boolean isSdInit = false;
+
+#define NUM_SONGS 6
+static const char* files[NUM_SONGS] = {
+  "p.mp3",
+  "b.mp3",
+  "o.mp3",
+  "y.mp3",
+  "r.mp3",
+  "g.mp3",
+};
+
 // Button control inputs
 #define RED_BUTTON A5
 #define GREEN_BUTTON A4
@@ -80,21 +95,16 @@
 #define BLUE_BUTTON A1
 #define ORANGE_BUTTON A0
 
-Adafruit_VS1053_FilePlayer musicPlayer =
-  Adafruit_VS1053_FilePlayer(VS1053bRESET, VS1053bCS, VS1053bDCS, DREQ, CARDCS);
-static boolean isDspOn = false;
-static volatile boolean isSdInit = false;
-
-#define NUM_SONGS 6
-
-static const char* files[NUM_SONGS] = {
-  "1.mp3",
-  "2.mp3",
-  "3.mp3",
-  "4.mp3",
-  "5.mp3",
-  "6.mp3",
+// LED map, cause I wired one of the harnesses wrong. grr. argh.
+const int buttonLedMap[6] = {
+  0,  // Red
+  1,  // Green
+  2,  // Yellow
+  3,  // Orange
+  5,  // Blue
+  4,  // Purple
 };
+
 
 enum PLayCommand {
   NO_COMMAND = 0,
@@ -112,6 +122,7 @@ ISR(PCINT1_vect) {
     buttonState = newButtonState;
     commandCount = commandCount + 1;
   }
+  PCICR &= ~_BV(1);
 }
 
 //// VS1053b
@@ -137,8 +148,9 @@ static void inline PowerOnDsp(void) {
   digitalWrite(VS1053bPOWER, LOW);
   // Per VS1053 10.2, Hardware Reset, DREQ is low for about 22000 clocks.
   // At 12Mhz, that's 1.8ms. Give 4 just for good measure.
-  delay(3);
+  delay(4);
   DEBUG_PRINTLN(F("DSP Powered On"));
+
   initMp3Shield();
 }
 
@@ -156,6 +168,7 @@ static void initMp3Shield() {
   // initialise the music player
   if (!musicPlayer.begin()) {
     DEBUG_PRINTLN(F("Couldn't find VS1053, do you have the right pins defined?"));
+    while(1);
     ErrorSleepForever();
   }
   DEBUG_PRINTLN(F("VS1053 found"));
@@ -237,11 +250,12 @@ void setup() {
   DEBUG_PRINTLN(F("May Music Box"));
 #endif
 
-  SPI.begin();
   // Start with DSP powered down. It is powered up on button push.
   pinMode(VS1053bPOWER, OUTPUT);
   pinMode(AMP_POWER, OUTPUT);
   PowerOffDsp();
+
+  SPI.begin();
 
   // Shut down bunches of modules we don't use.
   // See PRR register 14.12.3.
@@ -263,6 +277,7 @@ void setup() {
   delay(30);  // Give 30 ms for the debounce capacitors to charge. 1uF + 30k at 3.3v should charge in 23ms.
 
   // Ensure all unused pins are in output state.
+  // TODO(awong): Fix this.
 
   // Clear and enable Pinchange Interrupt Vector 1 for the analog pins A0-A5.
   PCIFR |= _BV(1);
@@ -287,6 +302,7 @@ void loop() {
   }
 
   // Start playing a file, then we can do stuff while waiting for it to finish
+  PCICR |= _BV(1);
   unsigned char lastButtonState = buttonState;
   if (hasNewSong && lastButtonState) {
     DEBUG_PRINTLN(F("Playing Song"));
@@ -315,9 +331,10 @@ void loop() {
 
       DEBUG_PRINT(F("Current file: "));
       DEBUG_PRINTLN(currentFile);
+      int led_value = buttonLedMap[5 - curSong];
       DEBUG_PRINT(F("Led Value: "));
-      DEBUG_PRINTLN(5 - curSong);
-      musicPlayer.sciWrite(VS1053_SCI_AICTRL0, 5 - curSong);
+      DEBUG_PRINTLN(led_value);
+      musicPlayer.sciWrite(VS1053_SCI_AICTRL0, led_value);
       if (! musicPlayer.startPlayingFile(currentFile)) {
         DEBUG_PRINT(F("Could not open file "));
       }
