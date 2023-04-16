@@ -1,6 +1,11 @@
 #ifndef BUTTONS_H_
 #define BUTTONS_H_
 
+#include "driver/gpio.h"
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+
 class AudioPlayer;
 class Led;
 
@@ -21,11 +26,12 @@ enum class ButtonEvent {
 };
 
 // TODO: Incorrect static.
-static constexpr int kNumButtons = 6;
 
 class Buttons {
  public:
-   Buttons(AudioPlayer *player, Led* led);
+  static constexpr int kNumButtons = 6;
+
+  Buttons(AudioPlayer *player, Led* led);
 
   // Takes 32 samples of the button state, 1ms apart.
   void blocking_sample();
@@ -64,7 +70,6 @@ class Buttons {
   // This reads the button state and sends commands until all buttons are
   // released.
   void process_buttons();
-
 };
 
 #endif  /* BUTTONS_H_ */
