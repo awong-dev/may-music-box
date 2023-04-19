@@ -1,5 +1,6 @@
 #include "buttons.h"
 
+#include <array>
 #include <limits>
 
 #include "freertos/FreeRTOS.h"
@@ -183,11 +184,31 @@ void IRAM_ATTR Buttons::push_history_bit(ButtonId b, bool value) {
 }
 
 void Buttons::sample_once() {
-
   for (int i = 0; i < kNumButtons; i++) {
     bool v = gpio_get_level(pin_id_map_[i].gpio) != 0;
     push_history_bit(pin_id_map_[i].id, v);
   }
+}
+
+static ButtonEvent button_state_to_event(bool prev, bool cur) {
+  if (prev && cur) {
+    return ButtonEvent::On;
+  } else if (prev && !cur) {
+    return ButtonEvent::Up;
+  } else if (!prev && cur) {
+    return ButtonEvent::Down;
+  } else {
+    return ButtonEvent::Off;
+  }
+}
+
+static void fill_events(std::array<ButtonEvent,6>& events, const ButtonState& prev, const ButtonState& cur) {
+  events[0] = button_state_to_event(prev.b0, cur.b0);
+  events[1] = button_state_to_event(prev.b1, cur.b1);
+  events[2] = button_state_to_event(prev.b2, cur.b2);
+  events[3] = button_state_to_event(prev.b3, cur.b3);
+  events[4] = button_state_to_event(prev.b4, cur.b4);
+  events[5] = button_state_to_event(prev.b5, cur.b5);
 }
 
 // This reads the button state and sends commands until all buttons are
@@ -199,17 +220,23 @@ void Buttons::process_buttons() {
 
       // Just woke... time to read button state and turn into a command.
     start_sample_timer();
+    ButtonState prev_bs = {};
     ButtonState bs = {};
     do {
-      xQueueReceive(sample_queue_, &bs, portMAX_DELAY);
+      if (xQueueReceive(sample_queue_, &bs, 1000 / portTICK_PERIOD_MS) == pdFALSE) {
+        // No change in state since we timedout. So just signal a status event.
+        bs = prev_bs;
+      }
+      std::array<ButtonEvent,6> events;
+      fill_events(events, prev_bs, bs);
+
       ESP_LOGI(TAG, "0:%02x 1:%02x 2:%02x 3:%02x 4:%02x 5:%02x",
-          static_cast<uint32_t>(bs.b0),
-          static_cast<uint32_t>(bs.b1),
-          static_cast<uint32_t>(bs.b2),
-          static_cast<uint32_t>(bs.b3),
-          static_cast<uint32_t>(bs.b4),
-          static_cast<uint32_t>(bs.b5));
-      int64_t button_down_times[kNumButtons] = {};
+          static_cast<uint32_t>(events[0]),
+          static_cast<uint32_t>(events[1]),
+          static_cast<uint32_t>(events[2]),
+          static_cast<uint32_t>(events[3]),
+          static_cast<uint32_t>(events[4]),
+          static_cast<uint32_t>(events[5]));
 
 /*
       for (int i = 0; i < kNumButtons; i++) {
@@ -253,6 +280,7 @@ void Buttons::process_buttons() {
       }
       */
 
+      prev_bs = bs;
     } while (!bs.all_off());
 
     stop_sample_timer();
