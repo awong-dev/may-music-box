@@ -1,111 +1,131 @@
 #include "audio_player.h"
 
-#include "audio_hal.h"
+//#include "audio_hal.h"
+#include "audio_def.h"
+#include "audio_element.h"
+#include "audio_pipeline.h"
 #include "esp_decoder.h"
+#include "mp3_decoder.h"
 #include "fatfs_stream.h"
 #include "i2s_stream.h"
 #include "raw_stream.h"
 
 #include "logging.h"
+#include "led_downmix.h"
 
 AudioPlayer::AudioPlayer() {
+  ESP_LOGI(TAG, "[4.0] Create audio pipeline for playback");
+  audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
+  pipeline_ = audio_pipeline_init(&pipeline_cfg);
+  mem_assert(pipeline_);
 
-/*
-  static audio_hal_codec_config_t hal_cfg = {
-    .adc_input = AUDIO_HAL_ADC_INPUT_LINE1,  // Doesn't matter.
-    .dac_output = AUDIO_HAL_DAC_OUTPUT_ALL,
-    .codec_mode = AUDIO_HAL_CODEC_MODE_DECODE,
-    .i2s_iface = {
-      .mode = AUDIO_HAL_MODE_MASTER,
-      .fmt = AUDIO_HAL_I2S_NORMAL,
-      .samples = AUDIO_HAL_48K_SAMPLES,
-      .bits = AUDIO_HAL_BIT_LENGTH_16BITS,
-    },
+  ESP_LOGI(TAG, "[4.1] Create i2s stream to write data to codec chip");
+  i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
+  i2s_cfg.use_alc = true;
+  i2s_cfg.i2s_config.sample_rate = 44100;
+  i2s_cfg.type = AUDIO_STREAM_WRITER;
+  i2s_stream_writer_ = i2s_stream_init(&i2s_cfg);
+
+  ESP_LOGI(TAG, "[4.2] Create mp3 decoder to decode mp3 file");
+  mp3_decoder_cfg_t mp3_cfg = DEFAULT_MP3_DECODER_CONFIG();
+  mp3_decoder_ = mp3_decoder_init(&mp3_cfg);
+
+  ESP_LOGI(TAG, "[4.3] Create led downmix filter");
+  led_downmix_cfg_t led_downmix_cfg = DEFAULT_LED_DOWNMIX_CONFIG();
+  led_downmix_ = led_downmix_init(&led_downmix_cfg);
+
+  ESP_LOGI(TAG, "[4.4] Create fatfs stream to read data from sdcard");
+  const char *url = "/sdcard/test.mp3";
+//  sdcard_list_current(sdcard_list_handle, &url);
+  fatfs_stream_cfg_t fatfs_cfg = FATFS_STREAM_CFG_DEFAULT();
+  fatfs_cfg.type = AUDIO_STREAM_READER;
+  fatfs_stream_reader_ = fatfs_stream_init(&fatfs_cfg);
+  audio_element_set_uri(fatfs_stream_reader_, url);
+
+  ESP_LOGI(TAG, "[4.5] Register all elements to audio pipeline");
+  audio_pipeline_register(pipeline_, fatfs_stream_reader_, "file");
+  audio_pipeline_register(pipeline_, mp3_decoder_, "decoder");
+  audio_pipeline_register(pipeline_, led_downmix_, "filter");
+  audio_pipeline_register(pipeline_, i2s_stream_writer_, "i2s");
+
+  ESP_LOGI(TAG, "[4.6] Link it together [sdcard]-->fatfs_stream-->mp3_decoder-->led_downmix-->i2s_stream-->[codec_chip]");
+  static const char *link_tag[4] = {"file", "decoder", "filter", "i2s"};
+  audio_pipeline_link(pipeline_, &link_tag[0], 4);
+
+  ESP_LOGI(TAG, "[5.0] Set up  event listener");
+  audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
+  audio_event_iface_handle_t evt = audio_event_iface_init(&evt_cfg);
+
+  ESP_LOGI(TAG, "[5.1] Listen for all pipeline events");
+  audio_pipeline_set_listener(pipeline_, evt);
+
+  ESP_LOGW(TAG, "[ 6.1 ] Enable audio chip");
+  // Enable chip.
+  ESP_LOGI(TAG, "Configuring I2S GPIO");
+  static const gpio_config_t amp_pins = {
+    .pin_bit_mask = (
+        (1ULL << GPIO_NUM_4) |
+//        (1ULL << GPIO_NUM_5) |
+        (1ULL << GPIO_NUM_16)
+ //       (1ULL << GPIO_NUM_17) |
+//        (1ULL << GPIO_NUM_18)
+        ),
+    .mode = GPIO_MODE_OUTPUT,
+    .pull_up_en = GPIO_PULLUP_DISABLE,
+    .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    .intr_type = GPIO_INTR_DISABLE
   };
-//  audio_hal_handle_t hal_;
-  hal_ = audio_hal_init(&hal_cfg, NULL);
+  ESP_ERROR_CHECK(gpio_config(&amp_pins));
+  gpio_set_level(GPIO_NUM_4, 1);
 
-  audio_hal_ctrl_codec(hal_, AUDIO_HAL_CODEC_MODE_DECODE, AUDIO_HAL_CTRL_START);
-  */
+  // Initial volume set!
+  int vol = -20;
+  i2s_alc_volume_set(i2s_stream_writer_, vol);
 
-  // Setup the basic player_.
-  esp_audio_cfg_t cfg = DEFAULT_ESP_AUDIO_CONFIG();
-  cfg.resample_rate = 48000;
-  cfg.prefer_type = ESP_AUDIO_PREFER_MEM;
-  cfg.evt_que = event_queue_;
-  cfg.vol_handle = this;
-  cfg.vol_set = (audio_volume_set)i2s_alc_volume_set;
-  cfg.vol_get = (audio_volume_get)i2s_alc_volume_get;
-  player_ = esp_audio_create(&cfg);
-
-  // Create fatfs reader and add to esp_audio
-  fatfs_stream_cfg_t fs_reader = FATFS_STREAM_CFG_DEFAULT();
-  fs_reader.type = AUDIO_STREAM_READER;
-  esp_audio_input_stream_add(player_, fatfs_stream_init(&fs_reader));
-
-  // Add decoders and encoders to esp_audio. Use autodecoder.
-  audio_decoder_t auto_decode[] = {
-    DEFAULT_ESP_MP3_DECODER_CONFIG(),
-    DEFAULT_ESP_AAC_DECODER_CONFIG(),
-    DEFAULT_ESP_OGG_DECODER_CONFIG(),
-    DEFAULT_ESP_AMRNB_DECODER_CONFIG(),
-    DEFAULT_ESP_AMRWB_DECODER_CONFIG(),
-    DEFAULT_ESP_FLAC_DECODER_CONFIG(),
-    DEFAULT_ESP_OPUS_DECODER_CONFIG(),
-    DEFAULT_ESP_WAV_DECODER_CONFIG(),
-    DEFAULT_ESP_M4A_DECODER_CONFIG(),
-    DEFAULT_ESP_TS_DECODER_CONFIG(),
-  };
-  esp_decoder_cfg_t auto_dec_cfg = DEFAULT_ESP_DECODER_CONFIG();
-  esp_audio_codec_lib_add(player_, AUDIO_CODEC_TYPE_DECODER,
-      esp_decoder_init(&auto_dec_cfg, auto_decode, 10));
-
-  // Create writers and add to esp_audio
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
-  i2s_stream_cfg_t i2s_writer = I2S_STREAM_CFG_DEFAULT();
-#pragma GCC diagnostic pop
-  i2s_writer.i2s_config.sample_rate = 48000;
-  i2s_writer.i2s_config.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_TX);
-  i2s_writer.type = AUDIO_STREAM_WRITER;
-
-  raw_stream_cfg_t raw_reader = RAW_STREAM_CFG_DEFAULT();
-  raw_reader.type = AUDIO_STREAM_READER;
-  i2s_ =  i2s_stream_init(&i2s_writer);
-  raw_stream_ = raw_stream_init(&raw_reader);
-
-  esp_audio_output_stream_add(player_, i2s_);
-  esp_audio_output_stream_add(player_, raw_stream_);
-
-  // Set default volume
-  esp_audio_vol_set(player_, 35);
-  ESP_LOGI(TAG, "esp_audio instance is:%p\n", player_);
-
-  xTaskCreate(esp_audio_state_task_thunk, "player_task", 4096, this, 1, NULL);
-
-  // TODO: take raw_stream_h and use it to drive LED.
-}
-
-void AudioPlayer::esp_audio_state_task() {
-  esp_audio_state_t esp_state = {};
+  ESP_LOGW(TAG, "[ 6.2 ] Start playing");
+  #if 0
+  audio_pipeline_run(pipeline_);
   while (1) {
-    xQueueReceive(event_queue_, &esp_state, portMAX_DELAY);
-    ESP_LOGI(TAG, "esp_auido status:%x,err:%x\n", esp_state.status, esp_state.err_msg);
-    if ((esp_state.status == AUDIO_STATUS_FINISHED)
-        || (esp_state.status == AUDIO_STATUS_ERROR)) {
-      int time = 0;
-      int duration = 0;
-      esp_audio_time_get(player_, &time);
-      esp_audio_duration_get(player_, &duration);
-      ESP_LOGI(TAG, "[ * ] End at time:%d ms, duration:%d ms", time, duration);
-    }
+      /* Handle event interface messages from pipeline
+         to set music info and to advance to the next song
+      */
+      audio_event_iface_msg_t msg;
+      esp_err_t ret = audio_event_iface_listen(evt, &msg, portMAX_DELAY);
+      if (ret != ESP_OK) {
+          ESP_LOGE(TAG, "[ * ] Event interface error : %d", ret);
+          continue;
+      }
+      if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT) {
+          // Set music info for a new song to be played
+          if (msg.source == (void *) mp3_decoder_
+              && msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO) {
+              audio_element_info_t music_info = {0};
+              audio_element_getinfo(mp3_decoder_, &music_info);
+              ESP_LOGI(TAG, "[ * ] Received music info from mp3 decoder, sample_rates=%d, bits=%d, ch=%d",
+                       music_info.sample_rates, music_info.bits, music_info.channels);
+              audio_element_setinfo(i2s_stream_writer_, &music_info);
+              ESP_ERROR_CHECK(i2s_stream_set_clk(i2s_stream_writer_, music_info.sample_rates, music_info.bits, music_info.channels));
+              continue;
+          }
+          // Advance to the next song when previous finishes
+          if (msg.source == (void *) i2s_stream_writer_
+              && msg.cmd == AEL_MSG_CMD_REPORT_STATUS) {
+              audio_element_state_t el_state = audio_element_get_state(i2s_stream_writer_);
+              if (el_state == AEL_STATE_FINISHED) {
+                  ESP_LOGI(TAG, "[ * ] Finished.");
+                  return;
+              }
+              continue;
+          }
+      }
   }
+  #endif
 }
 
 esp_err_t AudioPlayer::set_volume(void *obj, int vol) {
-  return i2s_alc_volume_set(static_cast<AudioPlayer*>(obj)->i2s_, vol);
+  return i2s_alc_volume_set(static_cast<AudioPlayer*>(obj)->i2s_stream_writer_, vol);
 }
 
 esp_err_t AudioPlayer::get_volume(void *obj, int* vol) {
-  return i2s_alc_volume_get(static_cast<AudioPlayer*>(obj)->i2s_, vol);
+  return i2s_alc_volume_get(static_cast<AudioPlayer*>(obj)->i2s_stream_writer_, vol);
 }

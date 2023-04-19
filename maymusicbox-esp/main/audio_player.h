@@ -2,30 +2,24 @@
 #define AUDIO_PLAYER_H_
 
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
+//#include "freertos/queue.h"
 
 #include "audio_element.h"
-#include "esp_audio.h"
+#include "audio_pipeline.h"
+//#include "esp_audio.h"
 
 class AudioPlayer {
  public:
   AudioPlayer();
   void start_playing(int id);
-  audio_element_handle_t raw_stream() {
-    return raw_stream_;
-  }
 
  private:
-  esp_audio_handle_t player_;
-  QueueHandle_t event_queue_ = xQueueCreate(3, sizeof(esp_audio_state_t));
-  audio_element_handle_t i2s_ = NULL;
-  audio_element_handle_t raw_stream_ = NULL;
+  audio_pipeline_handle_t pipeline_ = nullptr;
+  audio_element_handle_t i2s_stream_writer_ = nullptr;
+  audio_element_handle_t mp3_decoder_ =  nullptr;
+  audio_element_handle_t led_downmix_ = nullptr;
+  audio_element_handle_t fatfs_stream_reader_ = nullptr;
 
-  static void esp_audio_state_task_thunk(void *param) {
-    static_cast<AudioPlayer*>(param)->esp_audio_state_task();
-  }
-
-  void esp_audio_state_task();
   static esp_err_t set_volume(void *obj, int vol);
   static esp_err_t get_volume(void *obj, int* vol);
 };

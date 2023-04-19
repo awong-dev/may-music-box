@@ -5,9 +5,9 @@
 
 class Led {
  public:
-  explicit Led(audio_element_handle_t raw_stream) : raw_stream_(raw_stream) {}
+  explicit Led(audio_element_handle_t raw_stream);
   void pin_to_max(int id);
-  void unpin(int id);
+  void unpin(int id) {}
 
  private:
   audio_element_handle_t raw_stream_;

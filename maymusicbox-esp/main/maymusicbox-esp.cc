@@ -21,30 +21,6 @@
 // Look at this as an example of 2 outputs.
 // https://github.com/espressif/esp-adf/blob/master/examples/advanced_examples/http_play_and_save_to_file/main/http_play_and_save_to_file.c
 
-static void control_task (void *param) {
-  QueueHandle_t q = (QueueHandle_t) param;
-  int command;
-  while (1) {
-    xQueueReceive(q, &command, portMAX_DELAY);
-    /*
-    switch (command) {
-      case PLAY_RED:
-      case PLAY_BLUE:
-      case PLAY_ORANGE:
-      case PLAY_YELLOW:
-      case PLAY_GREEN:
-      case PLAY_PURPLE:
-
-      case STOP:
-
-      case WIFI_ON:
-
-      default:
-    }
-    */
-  }
-}
-
 // Mounts the SD Card connected to VSPI default pins on /sdcard
 sdmmc_card_t* mount_sdcard() {
   ESP_LOGI(TAG, "Configuring SD card GPIO");
@@ -139,25 +115,6 @@ void configure_leds(void) {
 
 }
 
-void configure_i2s(void) {
-  ESP_LOGI(TAG, "Configuring I2S GPIO");
-  static const gpio_config_t amp_pins = {
-    .pin_bit_mask = (
-        (1ULL << GPIO_NUM_4) |
-        (1ULL << GPIO_NUM_5) |
-        (1ULL << GPIO_NUM_16) |
-        (1ULL << GPIO_NUM_17) |
-        (1ULL << GPIO_NUM_18)
-        ),
-    .mode = GPIO_MODE_OUTPUT,
-    .pull_up_en = GPIO_PULLUP_DISABLE,
-    .pull_down_en = GPIO_PULLDOWN_DISABLE,
-    .intr_type = GPIO_INTR_DISABLE
-  };
-  ESP_ERROR_CHECK(gpio_config(&amp_pins));
-
-}
-
 void configure_rtc_wake(void) {
   // Set up RTC wake for IO 32,33,34,35,36,39
 }
@@ -169,9 +126,18 @@ extern "C" void app_main(void)
 
   mount_sdcard();
 
+
+  ESP_LOGI(TAG, "Reading /sdcard/test.txt from SDCARD");
+  FILE* f = fopen("/sdcard/test.txt", "r");
+  static char buf[2048];
+  fread(buf, sizeof(char), 2048, f);
+  ESP_LOGI(TAG, "%s", buf);
+  ESP_LOGI(TAG, "Done with SDCARD");
+
   AudioPlayer player;
-  Led led(player.raw_stream());
+  Led led(nullptr);
   Buttons buttons(&player, &led);
+  buttons.process_buttons();
 
   configure_rtc_wake();
 

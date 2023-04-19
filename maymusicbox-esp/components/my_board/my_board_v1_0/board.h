@@ -1,7 +1,7 @@
 /*
  * ESPRESSIF MIT License
  *
- * Copyright (c) 2019 <ESPRESSIF SYSTEMS (SHANGHAI) CO., LTD>
+ * Copyright (c) 2020 <ESPRESSIF SYSTEMS (SHANGHAI) CO., LTD>
  *
  * Permission is hereby granted for use on all ESPRESSIF SYSTEMS products, in which case,
  * it is free of charge, to any person obtaining a copy of this software and associated
@@ -29,7 +29,6 @@
 #include "board_def.h"
 #include "board_pins_config.h"
 #include "esp_peripherals.h"
-#include "display_service.h"
 #include "periph_sdcard.h"
 
 #ifdef __cplusplus
@@ -40,7 +39,8 @@ extern "C" {
  * @brief Audio board handle
  */
 struct audio_board_handle {
-    audio_hal_handle_t audio_hal; /*!< audio hardware abstract layer handle */
+    audio_hal_handle_t audio_hal;    /*!< pa hardware abstract layer handle */
+    audio_hal_handle_t adc_hal;      /*!< adc hardware abstract layer handle */
 };
 
 typedef struct audio_board_handle *audio_board_handle_t;
@@ -53,18 +53,18 @@ typedef struct audio_board_handle *audio_board_handle_t;
 audio_board_handle_t audio_board_init(void);
 
 /**
- * @brief Initialize codec chip
+ * @brief Initialize codec
  *
  * @return The audio hal handle
  */
 audio_hal_handle_t audio_board_codec_init(void);
 
 /**
- * @brief Initialize led peripheral and display service
+ * @brief Initialize adc
  *
- * @return The audio display service handle
+ * @return The adc hal handle
  */
-display_service_handle_t audio_board_led_init(void);
+audio_hal_handle_t audio_board_adc_init(void);
 
 /**
  * @brief Initialize key peripheral
