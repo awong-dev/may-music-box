@@ -6,25 +6,18 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
+#include "song.h"
+
 #include <atomic>
 
 class AudioPlayer;
 class Led;
 
-enum class ButtonId {
-  Red=0,
-  Orange,
-  Yellow,
-  Green,
-  Blue,
-  Purple,
-};
-
 enum class ButtonEvent : uint32_t {
   Off = 0,
+  Down = 1,
   Up = 2,
-  On = 1,
-  Down = 3,
+  On = 3,
 };
 
 
@@ -57,17 +50,12 @@ struct ButtonState {
 
 class Buttons {
  public:
-  static constexpr int kNumButtons = 6;
 
   Buttons(AudioPlayer *player, Led* led);
 
  private:
-  struct IdPinMap {
-    ButtonId id;
-    gpio_num_t gpio;
-  };
-
-  static const IdPinMap pin_id_map_[kNumButtons];
+  // Pin order follows SongColor int values.
+  static DRAM_ATTR const gpio_num_t button_gpio_list_[kNumColors];
   static const uint64_t kLongPressUs = 30*1000*1000;
 
   QueueHandle_t wake_queue_ = xQueueCreate(1, sizeof(char));
@@ -75,7 +63,7 @@ class Buttons {
   Led* led_;
 
   // Used by the timer interrupt.
-  uint32_t intr_history_[kNumButtons] = {};
+  uint32_t intr_history_[kNumColors] = {};
   uint64_t intr_num_samples_ = {};
   ButtonState intr_old_button_state_ = {};
 
@@ -90,8 +78,8 @@ class Buttons {
   void start_sample_timer();
   void stop_sample_timer();
   static void IRAM_ATTR on_timer_interrupt(void* param);
-  bool IRAM_ATTR is_on(ButtonId id);
-  void IRAM_ATTR push_history_bit(ButtonId b, bool value);
+  bool IRAM_ATTR is_on(SongColor color);
+  void IRAM_ATTR push_history_bit(SongColor b, bool value);
   void IRAM_ATTR sample_once();
 
 

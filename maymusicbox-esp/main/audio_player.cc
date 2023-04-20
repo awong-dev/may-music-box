@@ -36,7 +36,6 @@ AudioPlayer::AudioPlayer() {
 
   ESP_LOGI(TAG, "[4.4] Create fatfs stream to read data from sdcard");
   const char *url = "/sdcard/test.mp3";
-//  sdcard_list_current(sdcard_list_handle, &url);
   fatfs_stream_cfg_t fatfs_cfg = FATFS_STREAM_CFG_DEFAULT();
   fatfs_cfg.type = AUDIO_STREAM_READER;
   fatfs_stream_reader_ = fatfs_stream_init(&fatfs_cfg);
@@ -52,23 +51,13 @@ AudioPlayer::AudioPlayer() {
   static const char *link_tag[4] = {"file", "decoder", "filter", "i2s"};
   audio_pipeline_link(pipeline_, &link_tag[0], 4);
 
-  ESP_LOGI(TAG, "[5.0] Set up  event listener");
-  audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
-  audio_event_iface_handle_t evt = audio_event_iface_init(&evt_cfg);
-
-  ESP_LOGI(TAG, "[5.1] Listen for all pipeline events");
-  audio_pipeline_set_listener(pipeline_, evt);
-
   ESP_LOGW(TAG, "[ 6.1 ] Enable audio chip");
   // Enable chip.
-  ESP_LOGI(TAG, "Configuring I2S GPIO");
+  ESP_LOGI(TAG, "Turning on max98375a");
   static const gpio_config_t amp_pins = {
     .pin_bit_mask = (
         (1ULL << GPIO_NUM_4) |
-//        (1ULL << GPIO_NUM_5) |
         (1ULL << GPIO_NUM_16)
- //       (1ULL << GPIO_NUM_17) |
-//        (1ULL << GPIO_NUM_18)
         ),
     .mode = GPIO_MODE_OUTPUT,
     .pull_up_en = GPIO_PULLUP_DISABLE,
@@ -82,45 +71,19 @@ AudioPlayer::AudioPlayer() {
   int vol = -20;
   i2s_alc_volume_set(i2s_stream_writer_, vol);
 
-  ESP_LOGW(TAG, "[ 6.2 ] Start playing");
-  #if 0
-  audio_pipeline_run(pipeline_);
-  while (1) {
-      /* Handle event interface messages from pipeline
-         to set music info and to advance to the next song
-      */
-      audio_event_iface_msg_t msg;
-      esp_err_t ret = audio_event_iface_listen(evt, &msg, portMAX_DELAY);
-      if (ret != ESP_OK) {
-          ESP_LOGE(TAG, "[ * ] Event interface error : %d", ret);
-          continue;
-      }
-      if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT) {
-          // Set music info for a new song to be played
-          if (msg.source == (void *) mp3_decoder_
-              && msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO) {
-              audio_element_info_t music_info = {0};
-              audio_element_getinfo(mp3_decoder_, &music_info);
-              ESP_LOGI(TAG, "[ * ] Received music info from mp3 decoder, sample_rates=%d, bits=%d, ch=%d",
-                       music_info.sample_rates, music_info.bits, music_info.channels);
-              audio_element_setinfo(i2s_stream_writer_, &music_info);
-              ESP_ERROR_CHECK(i2s_stream_set_clk(i2s_stream_writer_, music_info.sample_rates, music_info.bits, music_info.channels));
-              continue;
-          }
-          // Advance to the next song when previous finishes
-          if (msg.source == (void *) i2s_stream_writer_
-              && msg.cmd == AEL_MSG_CMD_REPORT_STATUS) {
-              audio_element_state_t el_state = audio_element_get_state(i2s_stream_writer_);
-              if (el_state == AEL_STATE_FINISHED) {
-                  ESP_LOGI(TAG, "[ * ] Finished.");
-                  return;
-              }
-              continue;
-          }
-      }
-  }
-  #endif
+  xTaskCreate(&AudioPlayer::pipeline_task_thunk, "pipeline_task", 4096, this, 1, NULL);
 }
+
+void AudioPlayer::start_playing(SongColor color) {
+  ESP_LOGW(TAG, "[ * ] Playing test.mp3");
+  const char *url = "/sdcard/test.mp3";
+  audio_pipeline_stop(pipeline_);
+  audio_element_set_uri(fatfs_stream_reader_, url);
+  audio_pipeline_reset_ringbuffer(pipeline_);
+  audio_pipeline_reset_elements(pipeline_);
+  audio_pipeline_change_state(pipeline_, AEL_STATE_INIT);
+  audio_pipeline_run(pipeline_);
+};
 
 esp_err_t AudioPlayer::set_volume(void *obj, int vol) {
   return i2s_alc_volume_set(static_cast<AudioPlayer*>(obj)->i2s_stream_writer_, vol);
@@ -128,4 +91,58 @@ esp_err_t AudioPlayer::set_volume(void *obj, int vol) {
 
 esp_err_t AudioPlayer::get_volume(void *obj, int* vol) {
   return i2s_alc_volume_get(static_cast<AudioPlayer*>(obj)->i2s_stream_writer_, vol);
+}
+
+void AudioPlayer::pipeline_task() {
+  ESP_LOGI(TAG, "[7.0] Set up  event listener");
+  audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
+  audio_event_iface_handle_t evt = audio_event_iface_init(&evt_cfg);
+
+  ESP_LOGI(TAG, "[7.1] Listen for all pipeline events");
+  audio_pipeline_set_listener(pipeline_, evt);
+  /*
+  ESP_LOGI(TAG, "[5.0] Set up  event listener");
+  audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
+  evt_ = audio_event_iface_init(&evt_cfg);
+
+  ESP_LOGI(TAG, "[5.1] Listen for all pipeline events");
+  audio_pipeline_set_listener(pipeline_, evt_);
+  */
+
+  audio_pipeline_run(pipeline_);
+
+  while (1) {
+    /* Handle event interface messages from pipeline
+       to set music info and to advance to the next song
+     */
+    audio_event_iface_msg_t msg;
+    esp_err_t ret = audio_event_iface_listen(evt, &msg, portMAX_DELAY);
+    if (ret != ESP_OK) {
+      ESP_LOGE(TAG, "[ * ] Event interface error : %d", ret);
+      continue;
+    }
+    if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT) {
+      // Set music info for a new song to be played
+      if (msg.source == (void *) mp3_decoder_
+          && msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO) {
+        audio_element_info_t music_info = {0};
+        audio_element_getinfo(mp3_decoder_, &music_info);
+        ESP_LOGI(TAG, "[ * ] Received music info from mp3 decoder, sample_rates=%d, bits=%d, ch=%d",
+            music_info.sample_rates, music_info.bits, music_info.channels);
+        audio_element_setinfo(i2s_stream_writer_, &music_info);
+        ESP_ERROR_CHECK(i2s_stream_set_clk(i2s_stream_writer_, music_info.sample_rates, music_info.bits, music_info.channels));
+        continue;
+      }
+      // Advance to the next song when previous finishes
+      if (msg.source == (void *) i2s_stream_writer_
+          && msg.cmd == AEL_MSG_CMD_REPORT_STATUS) {
+        audio_element_state_t el_state = audio_element_get_state(i2s_stream_writer_);
+        if (el_state == AEL_STATE_FINISHED) {
+          ESP_LOGI(TAG, "[ * ] Finished.");
+//          return;
+        }
+        continue;
+      }
+    }
+  }
 }

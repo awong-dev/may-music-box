@@ -3,11 +3,13 @@
 
 #include "audio_element.h"
 
+#include "song.h"
+
 class Led {
  public:
   explicit Led(audio_element_handle_t raw_stream);
-  void pin_to_max(int id);
-  void unpin(int id) {}
+  void pulseActive(SongColor id) {}
+  void followAudio(SongColor id) {}
 
  private:
   audio_element_handle_t raw_stream_;

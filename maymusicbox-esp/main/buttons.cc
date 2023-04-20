@@ -28,12 +28,12 @@ void IRAM_ATTR Buttons::on_timer_interrupt(void* param) {
     buttons->intr_num_samples_++;
 
     ButtonState bs = {};
-    bs.b0 = buttons->is_on(ButtonId::Red);
-    bs.b1 = buttons->is_on(ButtonId::Orange);
-    bs.b2 = buttons->is_on(ButtonId::Yellow);
-    bs.b3 = buttons->is_on(ButtonId::Green);
-    bs.b4 = buttons->is_on(ButtonId::Blue);
-    bs.b5 = buttons->is_on(ButtonId::Purple);
+    bs.b0 = buttons->is_on(SongColor::Red);
+    bs.b1 = buttons->is_on(SongColor::Orange);
+    bs.b2 = buttons->is_on(SongColor::Yellow);
+    bs.b3 = buttons->is_on(SongColor::Green);
+    bs.b4 = buttons->is_on(SongColor::Blue);
+    bs.b5 = buttons->is_on(SongColor::Purple);
 
     if (buttons->intr_num_samples_ >= 32 && bs != buttons->intr_old_button_state_) {
       buttons->intr_old_button_state_ = bs;
@@ -120,13 +120,12 @@ Buttons::Buttons(AudioPlayer *player, Led* led) : player_(player), led_(led) {
 }
 
 // Impelement the Hackaday debounce method.
-bool Buttons::is_on(ButtonId id) {
+bool Buttons::is_on(SongColor color) {
   static constexpr uint32_t kDebounceMask = 0xFF0000FF;
-  static constexpr uint32_t kDebounceOn = (0x00000000) & kDebounceMask;
   static constexpr uint32_t kDebounceUp = (0xFFFFFFFF >> 4) & kDebounceMask;
   static constexpr uint32_t kDebounceDown = (0xFFFFFFFF << 28) & kDebounceMask;
 
-  uint32_t& h = intr_history_[static_cast<int>(id)];
+  uint32_t& h = intr_history_[static_cast<int>(color)];
   // Do some denoising here. 
   if ((h & kDebounceMask) == kDebounceDown) {
     // Setting to 0xFFFFFFFFUL avoids suprious "Down" signals.
@@ -140,13 +139,13 @@ bool Buttons::is_on(ButtonId id) {
   return h == 0;
 }
 
-const Buttons::IdPinMap Buttons::pin_id_map_[] = {
-  { ButtonId::Red, GPIO_NUM_32 },
-  { ButtonId::Orange, GPIO_NUM_33 },
-  { ButtonId::Yellow, GPIO_NUM_34 },
-  { ButtonId::Green, GPIO_NUM_35 },
-  { ButtonId::Blue, GPIO_NUM_36 },
-  { ButtonId::Purple, GPIO_NUM_39 },
+const gpio_num_t Buttons::button_gpio_list_[] = {
+  GPIO_NUM_32,
+  GPIO_NUM_33,
+  GPIO_NUM_34,
+  GPIO_NUM_35,
+  GPIO_NUM_36,
+  GPIO_NUM_39,
 };
 
 const uint64_t Buttons::kLongPressUs;
@@ -159,14 +158,14 @@ void IRAM_ATTR Buttons::on_interrupt(void *args) {
 }
 
 void Buttons::enable_interrupts() const {
-  for (int i = 0; i < kNumButtons; i++) {
-    gpio_intr_enable(pin_id_map_[i].gpio);
+  for (int i = 0; i < kNumColors; i++) {
+    gpio_intr_enable(button_gpio_list_[i]);
   }
 }
 
 void IRAM_ATTR Buttons::disable_interrupts() const {
-  for (int i = 0; i < kNumButtons; i++) {
-    gpio_intr_disable(pin_id_map_[i].gpio);
+  for (int i = 0; i < kNumColors; i++) {
+    gpio_intr_disable(button_gpio_list_[i]);
   }
 }
 
@@ -175,7 +174,7 @@ void IRAM_ATTR Buttons::wake() {
   xQueueSendFromISR(wake_queue_, &dummy, NULL);
 }
 
-void IRAM_ATTR Buttons::push_history_bit(ButtonId b, bool value) {
+void IRAM_ATTR Buttons::push_history_bit(SongColor b, bool value) {
   int id = static_cast<int>(b);
   intr_history_[id] = intr_history_[id] << 1;
   if (value) {
@@ -184,9 +183,9 @@ void IRAM_ATTR Buttons::push_history_bit(ButtonId b, bool value) {
 }
 
 void Buttons::sample_once() {
-  for (int i = 0; i < kNumButtons; i++) {
-    bool v = gpio_get_level(pin_id_map_[i].gpio) != 0;
-    push_history_bit(pin_id_map_[i].id, v);
+  for (int i = 0; i < kNumColors; i++) {
+    bool v = gpio_get_level(button_gpio_list_[i]) != 0;
+    push_history_bit(static_cast<SongColor>(i), v);
   }
 }
 
@@ -202,7 +201,7 @@ static ButtonEvent button_state_to_event(bool prev, bool cur) {
   }
 }
 
-static void fill_events(std::array<ButtonEvent,6>& events, const ButtonState& prev, const ButtonState& cur) {
+static void state_to_events(std::array<ButtonEvent,6>& events, const ButtonState& prev, const ButtonState& cur) {
   events[0] = button_state_to_event(prev.b0, cur.b0);
   events[1] = button_state_to_event(prev.b1, cur.b1);
   events[2] = button_state_to_event(prev.b2, cur.b2);
@@ -222,13 +221,14 @@ void Buttons::process_buttons() {
     start_sample_timer();
     ButtonState prev_bs = {};
     ButtonState bs = {};
+    uint64_t button_down_times[kNumColors];
     do {
       if (xQueueReceive(sample_queue_, &bs, 1000 / portTICK_PERIOD_MS) == pdFALSE) {
         // No change in state since we timedout. So just signal a status event.
         bs = prev_bs;
       }
       std::array<ButtonEvent,6> events;
-      fill_events(events, prev_bs, bs);
+      state_to_events(events, prev_bs, bs);
 
       ESP_LOGI(TAG, "0:%02x 1:%02x 2:%02x 3:%02x 4:%02x 5:%02x",
           static_cast<uint32_t>(events[0]),
@@ -238,36 +238,30 @@ void Buttons::process_buttons() {
           static_cast<uint32_t>(events[4]),
           static_cast<uint32_t>(events[5]));
 
-/*
-      for (int i = 0; i < kNumButtons; i++) {
-        switch (get_event(static_cast<ButtonId>(i))) {
+      for (int i = 0; i < kNumColors; i++) {
+        SongColor color = static_cast<SongColor>(i);
+        switch (events[i]) {
           case ButtonEvent::Up:
-            ESP_LOGI(TAG, "Button up.");
+            ESP_LOGI(TAG, "Button %d up.", i);
             button_down_times[i] = 0;
-            if ((button_down_times[0] | button_down_times[1] |
-                 button_down_times[2] | button_down_times[3] |
-                 button_down_times[4] | button_down_times[5]) == 0) {
-//              player_->start_playing(i);
-            } else {
-              // TODO: pinning needs to be a semaphore counter.
-              led_->unpin(i);
-            }
+            led_->followAudio(color);
             break;
 
           case ButtonEvent::Down:
-            ESP_LOGI(TAG, "Button down.");
-            // TODO: Make LED Max bright.
-//            led_->pin_to_max(i);
+            ESP_LOGI(TAG, "Button %d down.", i);
+            player_->start_playing(color);
+            led_->pulseActive(color);
             button_down_times[i] = esp_timer_get_time();
             break;
 
           case ButtonEvent::On:
-            ESP_LOGI(TAG, "Button on.");
             if ((esp_timer_get_time() - button_down_times[i]) > kLongPressUs) {
               // TODO: Flag a long press.
+              ESP_LOGI(TAG, "Button %d long press.", i);
             }
             break;
 
+          case ButtonEvent::Off:
           default:
             // Don't care.
             break;
@@ -278,7 +272,6 @@ void Buttons::process_buttons() {
         // 60-second hold of all 3 buttons = "bluetooth pair" mode.
         // 30-second hold of all 3 buttons = "bluetooth on" mode.
       }
-      */
 
       prev_bs = bs;
     } while (!bs.all_off());
