@@ -49,7 +49,7 @@ Led::Led(audio_element_handle_t raw_stream)
       .channel        = kLedcChannel,
       .intr_type      = LEDC_INTR_DISABLE,
       .timer_sel      = kLedcTimer,
-      .duty           = 0, // Set duty to 0%
+      .duty           = 20, // Set duty to 0%
       .hpoint         = 0,
       .flags          = {}
   };
@@ -69,6 +69,25 @@ Led::Led(audio_element_handle_t raw_stream)
 
   ledc_channel.gpio_num = GPIO_NUM_27;
   ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
+  ledc_fade_func_install(0);
+}
+
+void Led::pulse_active(SongColor id) {
+  ledc_set_fade_step_and_start(
+      kLedcSpeedMode,
+      kLedcChannel,
+      8191,  // target
+      1000, // scale
+      1, // cycle_num,
+      LEDC_FADE_WAIT_DONE);
+
+  ledc_set_fade_step_and_start(
+      kLedcSpeedMode,
+      kLedcChannel,
+      500,  // target
+      10, // scale
+      1, // cycle_num,
+      LEDC_FADE_NO_WAIT);
 }
 
 void Led::led_task() {

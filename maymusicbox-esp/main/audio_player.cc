@@ -78,10 +78,12 @@ void AudioPlayer::start_playing(SongColor color) {
   ESP_LOGW(TAG, "[ * ] Playing test.mp3");
   const char *url = "/sdcard/test.mp3";
   audio_pipeline_stop(pipeline_);
+
   audio_element_set_uri(fatfs_stream_reader_, url);
   audio_pipeline_reset_ringbuffer(pipeline_);
   audio_pipeline_reset_elements(pipeline_);
   audio_pipeline_change_state(pipeline_, AEL_STATE_INIT);
+
   audio_pipeline_run(pipeline_);
 };
 
@@ -100,14 +102,6 @@ void AudioPlayer::pipeline_task() {
 
   ESP_LOGI(TAG, "[7.1] Listen for all pipeline events");
   audio_pipeline_set_listener(pipeline_, evt);
-  /*
-  ESP_LOGI(TAG, "[5.0] Set up  event listener");
-  audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
-  evt_ = audio_event_iface_init(&evt_cfg);
-
-  ESP_LOGI(TAG, "[5.1] Listen for all pipeline events");
-  audio_pipeline_set_listener(pipeline_, evt_);
-  */
 
   audio_pipeline_run(pipeline_);
 
@@ -139,7 +133,6 @@ void AudioPlayer::pipeline_task() {
         audio_element_state_t el_state = audio_element_get_state(i2s_stream_writer_);
         if (el_state == AEL_STATE_FINISHED) {
           ESP_LOGI(TAG, "[ * ] Finished.");
-//          return;
         }
         continue;
       }

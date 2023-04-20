@@ -8,8 +8,8 @@
 class Led {
  public:
   explicit Led(audio_element_handle_t raw_stream);
-  void pulseActive(SongColor id) {}
-  void followAudio(SongColor id) {}
+  void pulse_active(SongColor id);
+  void follow_audio(SongColor id) {}
 
  private:
   audio_element_handle_t raw_stream_;

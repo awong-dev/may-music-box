@@ -244,13 +244,13 @@ void Buttons::process_buttons() {
           case ButtonEvent::Up:
             ESP_LOGI(TAG, "Button %d up.", i);
             button_down_times[i] = 0;
-            led_->followAudio(color);
+            led_->follow_audio(color);
             break;
 
           case ButtonEvent::Down:
             ESP_LOGI(TAG, "Button %d down.", i);
+            led_->pulse_active(color);
             player_->start_playing(color);
-            led_->pulseActive(color);
             button_down_times[i] = esp_timer_get_time();
             break;
 
