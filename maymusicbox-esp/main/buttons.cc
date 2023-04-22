@@ -140,12 +140,12 @@ bool Buttons::is_on(SongColor color) {
 }
 
 const gpio_num_t Buttons::button_gpio_list_[] = {
-  GPIO_NUM_32,
   GPIO_NUM_33,
-  GPIO_NUM_34,
+  GPIO_NUM_32,
   GPIO_NUM_35,
-  GPIO_NUM_36,
+  GPIO_NUM_34,
   GPIO_NUM_39,
+  GPIO_NUM_36,
 };
 
 const uint64_t Buttons::kLongPressUs;
@@ -244,12 +244,12 @@ void Buttons::process_buttons() {
           case ButtonEvent::Up:
             ESP_LOGI(TAG, "Button %d up.", i);
             button_down_times[i] = 0;
-            led_->follow_audio(color);
+            led_->set_to_follow(color);
             break;
 
           case ButtonEvent::Down:
             ESP_LOGI(TAG, "Button %d down.", i);
-            led_->pulse_active(color);
+            led_->flare(color);
             player_->start_playing(color);
             button_down_times[i] = esp_timer_get_time();
             break;
@@ -275,14 +275,10 @@ void Buttons::process_buttons() {
 
       prev_bs = bs;
     } while (!bs.all_off());
-
     stop_sample_timer();
+    enable_interrupts();
 
     ESP_LOGI(TAG, "All off");
-    
-    // Play most recent up.
-
-    enable_interrupts();
   }
 }
 

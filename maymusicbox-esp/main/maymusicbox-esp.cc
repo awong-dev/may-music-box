@@ -134,8 +134,10 @@ extern "C" void app_main(void)
   ESP_LOGI(TAG, "%s", buf);
   ESP_LOGI(TAG, "Done with SDCARD");
 
+  Led led;
+  led.flare_all_and_follow();
+
   AudioPlayer player;
-  Led led(nullptr);
   Buttons buttons(&player, &led);
   buttons.process_buttons();
 
