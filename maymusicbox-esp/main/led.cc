@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "raw_stream.h"
+#include "driver/timer.h"
 
 #include "logging.h"
 
@@ -26,30 +27,14 @@ ledc_channel_config_t default_channel_config() {
 
 }  // namespace
 
-const std::array<gpio_num_t, kNumColors> Led::led_gpio_list_{
-  GPIO_NUM_25,
-  GPIO_NUM_26,
-  GPIO_NUM_27,
-  GPIO_NUM_14,
-  GPIO_NUM_13,
-  GPIO_NUM_15,
-};
-
-const std::array<ledc_channel_t, kNumColors + 1> Led::channel_list_{
-  LEDC_CHANNEL_0,
-  LEDC_CHANNEL_1,
-  LEDC_CHANNEL_2,
-  LEDC_CHANNEL_3,
-  LEDC_CHANNEL_4,
-  LEDC_CHANNEL_5,
-  LEDC_CHANNEL_6,
-};
+const std::array<gpio_num_t, kNumColors> Led::led_gpio_list_;
+const std::array<ledc_channel_t, kNumColors + 1> Led::channel_list_;
 
 Led::Led() {
   ESP_LOGI(TAG, "Configuring led GPIO");
   uint64_t pin_bit_mask = 0;
-  for (int i = 0; i < led_gpio_list_.size(); i++) {
-    pin_bit_mask = pin_bit_mask | (1ULL << led_gpio_list_[i]);
+  for (gpio_num_t pin : led_gpio_list_) {
+    pin_bit_mask = pin_bit_mask | (1ULL << pin);
   }
   static const gpio_config_t led_pins = {
     .pin_bit_mask = pin_bit_mask,
@@ -60,7 +45,7 @@ Led::Led() {
   };
   ESP_ERROR_CHECK(gpio_config(&led_pins));
 
-  // Prepare and then apply the LEDC PWM timer configuration
+  // Set up the Timer for all the PWMs.
   ledc_timer_config_t ledc_timer = {
       .speed_mode       = kLedcSpeedMode,
       .duty_resolution  = kLedcDutyResolution,
@@ -121,37 +106,98 @@ void Led::set_to_follow(SongColor color) {
 void Led::start_following(ringbuf_handle_t buf) {
   // Begin a 1khz timer that reads data off the ringbuf.
   follow_ringbuf_ = buf;
+
+  timer_config_t timer_config = {
+      .alarm_en = TIMER_ALARM_EN,
+      .counter_en = TIMER_PAUSE,
+      .intr_type = TIMER_INTR_LEVEL,
+      .counter_dir = TIMER_COUNT_UP,
+      .auto_reload = TIMER_AUTORELOAD_EN,
+      .divider = 10,
+  };
+  ESP_ERROR_CHECK(timer_init(TIMER_GROUP_1, TIMER_1, &timer_config));
+
+  timer_set_counter_value(TIMER_GROUP_1, TIMER_1, 0);
+
+  /* Configure the alarm value and the interrupt on alarm. */
+  timer_set_alarm_value(TIMER_GROUP_1, TIMER_1, 10000 /* timer_interval_sec * TIMER_SCALE */);
+
+  timer_enable_intr(TIMER_GROUP_1, TIMER_1);
+
+  timer_isr_callback_add(TIMER_GROUP_1, TIMER_1, &Led::on_follow_intr_, this, 0);
+
+  timer_start(TIMER_GROUP_1, TIMER_1);
+}
+
+bool IRAM_ATTR Led::on_follow_intr_(void *param) {
+  Led* led = static_cast<Led*>(param);
+  LedCommand c(LedCommand::SampleRingbuf, channel_list_.back(), 0);
+  xQueueSendFromISR(led->led_queue_, &c, 0);
+  return false;
 }
 
 bool Led::on_led_intr_(const ledc_cb_param_t *param, void *user_arg) {
   Led* led = static_cast<Led*>(user_arg);
   if (param->event == LEDC_FADE_END_EVT) {
-    xQueueSendFromISR(led->led_queue_, param, NULL);
+    LedCommand c(LedCommand::SampleRingbuf, static_cast<ledc_channel_t>(param->channel), param->duty);
+    xQueueSendFromISR(led->led_queue_, &c, NULL);
+    return true;
   }
   return false;
 }
 
 void Led::flare_channel(ledc_channel_t channel) {
-  ledc_set_fade_step_and_start(
-      kLedcSpeedMode,
-      channel,
-      8191,  // target
-      1000, // scale
-      1, // cycle_num,
-      LEDC_FADE_NO_WAIT);
+  LedCommand c(LedCommand::FlareToMax, channel, 0);
+  xQueueSend(led_queue_, &c, portMAX_DELAY);
 }
 
 void Led::led_task() {
   while(1) {
     LedCommand command;
     xQueueReceive(led_queue_, &command, portMAX_DELAY);
+    switch (command.action) {
+      case LedCommand::FlareToMax:
+        ledc_set_fade_step_and_start(
+            kLedcSpeedMode,
+            command.channel,
+            1024,  // target
+            500, // scale
+            3, // cycle_num,
+            LEDC_FADE_NO_WAIT);
+      break;
 
-    ledc_set_fade_step_and_start(
-        kLedcSpeedMode,
-        command.channel,
-        command.current_duty * 0.8,  // Taper to 80% of flare.
-        1,   // scale
-        100,    // cycle_num,
-        LEDC_FADE_NO_WAIT);
+      case LedCommand::DimTo80:
+        ledc_set_fade_step_and_start(
+            kLedcSpeedMode,
+            command.channel,
+            command.current_duty * 0.8,  // Taper to 80% of flare.
+            1,
+            100,
+            LEDC_FADE_NO_WAIT);
+      break;
+
+      case LedCommand::SampleRingbuf:
+        if (follow_ringbuf_) {
+          int16_t val;
+          if (rb_bytes_available(follow_ringbuf_) > sizeof(val)) {
+            rb_read(follow_ringbuf_, reinterpret_cast<char*>(&val), sizeof(val), 0);
+            int32_t power = val;
+            power *= power;
+            float percent = power;
+            // TODO: Fix math.
+            percent /= std::numeric_limits<int32_t>::max();
+            static constexpr int kMaxDuty = 1024;
+            ledc_set_fade_step_and_start(
+                kLedcSpeedMode,
+                command.channel,
+                kMaxDuty * percent,
+                1,  // TODO: Spread it over 1khz.
+                100,
+                LEDC_FADE_NO_WAIT);
+          }
+        }
+      break;
+    }
+
   }
 }
