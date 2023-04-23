@@ -17,6 +17,10 @@ class Led {
   void set_to_follow(SongColor color);
   void start_following(ringbuf_handle_t buf);
 
+  // Follow ringbuf info.
+  static inline constexpr int kFollowRateHz = 1000; // Window at 1000hz sample.
+  ringbuf_handle_t follow_ringbuf() const { return follow_ringbuf_; }
+
  private:
   struct LedCommand {
     enum Action {
@@ -32,8 +36,10 @@ class Led {
       : action(action), channel(channel), current_duty(currnt_duty) {}
   };
   QueueHandle_t led_queue_ = xQueueCreate(10, sizeof(LedCommand));
-  ringbuf_handle_t follow_ringbuf_ = nullptr;
 
+  // Handle up to 96khz samples. Add padding of 3 samples just because.
+  ringbuf_handle_t follow_ringbuf_ = rb_create(sizeof(int16_t), (96000 / kFollowRateHz) + 3);
+  bool is_following_ = false;
 
   // Pin order follows SongColor int values.
   static DRAM_ATTR constexpr std::array<gpio_num_t, kNumColors> led_gpio_list_ = {

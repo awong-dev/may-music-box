@@ -126,22 +126,13 @@ extern "C" void app_main(void)
 
   mount_sdcard();
 
-
-  ESP_LOGI(TAG, "Reading /sdcard/test.txt from SDCARD");
-  FILE* f = fopen("/sdcard/test.txt", "r");
-  static char buf[2048];
-  fread(buf, sizeof(char), 2048, f);
-  ESP_LOGI(TAG, "%s", buf);
-  ESP_LOGI(TAG, "Done with SDCARD");
-
   Led led;
   led.flare_all_and_follow();
 
-  AudioPlayer player;
+  AudioPlayer player(led.follow_ringbuf());
   Buttons buttons(&player, &led);
-  buttons.process_buttons();
 
   configure_rtc_wake();
 
-  // Enter sleep/play loop.
+  buttons.process_buttons();
 }

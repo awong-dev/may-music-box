@@ -10,7 +10,7 @@
 
 class AudioPlayer {
  public:
-  AudioPlayer();
+  explicit AudioPlayer(ringbuf_handle_t follow_ringbuf);
   void start_playing(SongColor color);
 
  private:

@@ -120,7 +120,8 @@ void Led::start_following(ringbuf_handle_t buf) {
   timer_set_counter_value(TIMER_GROUP_1, TIMER_1, 0);
 
   /* Configure the alarm value and the interrupt on alarm. */
-  timer_set_alarm_value(TIMER_GROUP_1, TIMER_1, 10000 /* timer_interval_sec * TIMER_SCALE */);
+  // TODO: Rate calculation here complete wrong.
+  timer_set_alarm_value(TIMER_GROUP_1, TIMER_1, kFollowRateHz /* timer_interval_sec * TIMER_SCALE */);
 
   timer_enable_intr(TIMER_GROUP_1, TIMER_1);
 
@@ -177,7 +178,7 @@ void Led::led_task() {
       break;
 
       case LedCommand::SampleRingbuf:
-        if (follow_ringbuf_) {
+        if (is_following_) {
           int16_t val;
           if (rb_bytes_available(follow_ringbuf_) > sizeof(val)) {
             rb_read(follow_ringbuf_, reinterpret_cast<char*>(&val), sizeof(val), 0);
@@ -191,8 +192,8 @@ void Led::led_task() {
                 kLedcSpeedMode,
                 command.channel,
                 kMaxDuty * percent,
-                1,  // TODO: Spread it over 1khz.
-                100,
+                1000,  // TODO: Spread it over 1khz.
+                25,
                 LEDC_FADE_NO_WAIT);
           }
         }

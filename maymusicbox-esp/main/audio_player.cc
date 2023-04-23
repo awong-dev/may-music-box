@@ -13,7 +13,7 @@
 #include "logging.h"
 #include "led_downmix.h"
 
-AudioPlayer::AudioPlayer() {
+AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf) {
   ESP_LOGI(TAG, "[4.0] Create audio pipeline for playback");
   audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
   pipeline_ = audio_pipeline_init(&pipeline_cfg);
@@ -32,6 +32,7 @@ AudioPlayer::AudioPlayer() {
 
   ESP_LOGI(TAG, "[4.3] Create led downmix filter");
   led_downmix_cfg_t led_downmix_cfg = DEFAULT_LED_DOWNMIX_CONFIG();
+  led_downmix_cfg.follow_ringbuf = follow_ringbuf;
   led_downmix_ = led_downmix_init(&led_downmix_cfg);
 
   ESP_LOGI(TAG, "[4.4] Create fatfs stream to read data from sdcard");
@@ -123,6 +124,7 @@ void AudioPlayer::pipeline_task() {
         audio_element_getinfo(mp3_decoder_, &music_info);
         ESP_LOGI(TAG, "[ * ] Received music info from mp3 decoder, sample_rates=%d, bits=%d, ch=%d",
             music_info.sample_rates, music_info.bits, music_info.channels);
+        audio_element_setinfo(led_downmix_, &music_info);
         audio_element_setinfo(i2s_stream_writer_, &music_info);
         ESP_ERROR_CHECK(i2s_stream_set_clk(i2s_stream_writer_, music_info.sample_rates, music_info.bits, music_info.channels));
         continue;

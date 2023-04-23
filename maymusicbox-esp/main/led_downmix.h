@@ -23,6 +23,8 @@ typedef struct led_downmix_cfg {
     int task_core;      /*!< Task running in core...*/
     int task_prio;      /*!< Task priority*/
     bool stack_in_ext;  /*!< Try to allocate stack in external memory */
+    ringbuf_handle_t follow_ringbuf;
+    int follow_rate;  /* how frequently the follow_ringbuf is read */
 } led_downmix_cfg_t;
 
 #define LED_DOWNMIX_TASK_STACK       (4 * 1024)
