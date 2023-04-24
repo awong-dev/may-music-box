@@ -74,9 +74,10 @@ class Buttons {
   void enable_interrupts() const; 
 
   // Impelement the Hackaday debounce method in an interrupt.
+  void config_sample_timer();
   void start_sample_timer();
   void stop_sample_timer();
-  static bool IRAM_ATTR on_timer_interrupt(void* param);
+  static void IRAM_ATTR on_timer_interrupt(void* param);
   bool IRAM_ATTR is_on(SongColor color);
   void IRAM_ATTR push_history_bit(SongColor b, bool value);
   void IRAM_ATTR sample_once();

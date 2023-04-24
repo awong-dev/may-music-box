@@ -22,29 +22,37 @@ static DRAM_ATTR constexpr int kTimerDivider = 16;
 static DRAM_ATTR constexpr int kTimerScale = TIMER_BASE_CLK / kTimerDivider;
 static DRAM_ATTR constexpr float kTimerInterval = (0.005/32); // 5ms total debounce
 
-bool IRAM_ATTR Buttons::on_timer_interrupt(void* param) {
-  Buttons* buttons = static_cast<Buttons*>(param);
-  buttons->sample_once();
-  buttons->intr_num_samples_++;
+void IRAM_ATTR Buttons::on_timer_interrupt(void* param) {
+  timer_spinlock_take(TIMER_GROUP_1);
+  uint32_t timer_intr = timer_group_get_intr_status_in_isr(TIMER_GROUP_1);
+  if (timer_intr & TIMER_INTR_T0) {
+    timer_group_clr_intr_status_in_isr(TIMER_GROUP_1, TIMER_0);
 
-  ButtonState bs = {};
-  bs.b0 = buttons->is_on(SongColor::Red);
-  bs.b1 = buttons->is_on(SongColor::Orange);
-  bs.b2 = buttons->is_on(SongColor::Yellow);
-  bs.b3 = buttons->is_on(SongColor::Green);
-  bs.b4 = buttons->is_on(SongColor::Blue);
-  bs.b5 = buttons->is_on(SongColor::Purple);
+    Buttons* buttons = static_cast<Buttons*>(param);
+    buttons->sample_once();
+    buttons->intr_num_samples_++;
 
-  if (buttons->intr_num_samples_ >= 32 && bs != buttons->intr_old_button_state_) {
-    buttons->intr_old_button_state_ = bs;
-    xQueueSendFromISR(buttons->sample_queue_, &bs, NULL);
-    return true;
+    ButtonState bs = {};
+    bs.b0 = buttons->is_on(SongColor::Red);
+    bs.b1 = buttons->is_on(SongColor::Orange);
+    bs.b2 = buttons->is_on(SongColor::Yellow);
+    bs.b3 = buttons->is_on(SongColor::Green);
+    bs.b4 = buttons->is_on(SongColor::Blue);
+    bs.b5 = buttons->is_on(SongColor::Purple);
+
+    if (buttons->intr_num_samples_ >= 32 && bs != buttons->intr_old_button_state_) {
+      buttons->intr_old_button_state_ = bs;
+      xQueueSendFromISR(buttons->sample_queue_, &bs, NULL);
+      }
+    // Reenable timer.
+    timer_group_enable_alarm_in_isr(TIMER_GROUP_1, TIMER_0);
   }
 
-  return true;
+  timer_spinlock_give(TIMER_GROUP_1);
 }
 
-void Buttons::start_sample_timer() {
+void Buttons::config_sample_timer() {
+  ESP_LOGI(TAG, "Configuring GPIO debounce sample timer");
   // Configure Button Sample timer.
   timer_config_t config = {
     .alarm_en = TIMER_ALARM_EN,
@@ -55,10 +63,15 @@ void Buttons::start_sample_timer() {
     .divider = kTimerDivider,
   }; // default clock source is APB
   timer_init(TIMER_GROUP_1, TIMER_0, &config);
-  timer_set_counter_value(TIMER_GROUP_1, TIMER_0, 0);
   timer_set_alarm_value(TIMER_GROUP_1, TIMER_0, kTimerInterval * kTimerScale);
-  timer_isr_callback_add(TIMER_GROUP_1, TIMER_0, &Buttons::on_timer_interrupt, this, 0);
+//  timer_isr_callback_add(TIMER_GROUP_1, TIMER_0, &Buttons::on_timer_interrupt, this, 0);
+  timer_isr_register(TIMER_GROUP_1, TIMER_0, &Buttons::on_timer_interrupt,
+      this, 0, NULL);
   timer_enable_intr(TIMER_GROUP_1, TIMER_0);
+}
+
+void Buttons::start_sample_timer() {
+  timer_set_counter_value(TIMER_GROUP_1, TIMER_0, 0);
 
   // Reset sampling state. Safe to do before timer starts.
   intr_history_[0] = 0xFFFFFFFF;
@@ -77,6 +90,8 @@ void Buttons::stop_sample_timer() {
 }
 
 Buttons::Buttons(AudioPlayer *player, Led* led) : player_(player), led_(led) {
+  config_sample_timer();
+
   ESP_LOGI(TAG, "Configuring button GPIO");
   static const gpio_config_t button_pullup_pins = {
     .pin_bit_mask = (
@@ -114,7 +129,6 @@ Buttons::Buttons(AudioPlayer *player, Led* led) : player_(player), led_(led) {
 
   ESP_LOGI(TAG, "Enabling button interrupts");
   enable_interrupts();
-
 }
 
 // Impelement the Hackaday debounce method.
@@ -250,14 +264,14 @@ void Buttons::process_buttons() {
           case ButtonEvent::Up:
             ESP_LOGI(TAG, "Button %d up.", i);
             button_down_times[i] = 0;
-            led_->set_to_follow(color);
+           led_->set_to_follow(color);
             break;
 
           case ButtonEvent::Down:
             ESP_LOGI(TAG, "Button %d down.", i);
             led_->start_following();
             led_->flare(color);
-//            player_->start_playing(color);
+            player_->start_playing(color);
             button_down_times[i] = esp_timer_get_time();
             break;
 

@@ -84,6 +84,8 @@ class Led {
 
   void flare_channel(ledc_channel_t channel);
 
+  void config_following();
+
   void led_task();
 };
 

@@ -57,14 +57,14 @@ Led::Led() {
   ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
 
   // Install the hardware fade setup.
-//  ledc_fade_func_install(0);
+  ledc_fade_func_install(0);
 
   ledc_cbs_t cbs;
   cbs.fade_cb = &Led::on_led_intr_;
   for (ledc_channel_t ch : channel_list_) {
     ledc_cb_register(kLedcSpeedMode, ch, &cbs, this);
   }
-//  xTaskCreate(&Led::led_task_thunk, "led_task", 4096, this, configMAX_PRIORITIES -1, NULL);
+  xTaskCreate(&Led::led_task_thunk, "led_task", 4096, this, configMAX_PRIORITIES -1, NULL);
 }
 
 void Led::flare(SongColor color) {
@@ -96,9 +96,7 @@ void Led::set_to_follow(SongColor color) {
   ESP_ERROR_CHECK(ledc_channel_config(&channel_config));
 }
 
-void Led::start_following() {
-  is_following_ = true;
-
+void Led::config_following() {
   // Begin a 1khz timer that reads data off the ringbuf.
   timer_config_t timer_config = {
       .alarm_en = TIMER_ALARM_EN,
@@ -110,15 +108,20 @@ void Led::start_following() {
   };
   ESP_ERROR_CHECK(timer_init(TIMER_GROUP_1, TIMER_1, &timer_config));
 
-  timer_set_counter_value(TIMER_GROUP_1, TIMER_1, 0);
-
   /* Configure the alarm value and the interrupt on alarm. */
   static DRAM_ATTR constexpr int kTimerDivider = 10;
   timer_set_alarm_value(TIMER_GROUP_1, TIMER_1, TIMER_BASE_CLK / kTimerDivider / kFollowRateHz);
 
-  timer_enable_intr(TIMER_GROUP_1, TIMER_1);
+//  timer_enable_intr(TIMER_GROUP_1, TIMER_1);
 
-  timer_isr_callback_add(TIMER_GROUP_1, TIMER_1, &Led::on_follow_intr_, this, 0);
+// TODO: This runs too frequently.
+//  timer_isr_callback_add(TIMER_GROUP_1, TIMER_1, &Led::on_follow_intr_, this, 0);
+}
+
+void Led::start_following() {
+  is_following_ = true;
+
+  timer_set_counter_value(TIMER_GROUP_1, TIMER_1, 0);
 
 //  timer_start(TIMER_GROUP_1, TIMER_1);
 }
