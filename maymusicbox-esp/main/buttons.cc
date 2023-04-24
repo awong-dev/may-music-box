@@ -255,14 +255,14 @@ void Buttons::process_buttons() {
           case ButtonEvent::Up:
             ESP_LOGI(TAG, "Button %d up.", i);
             button_down_times[i] = 0;
-//            led_->set_to_follow(color);
+            led_->dim_to_on(color);
             break;
 
           case ButtonEvent::Down:
             ESP_LOGI(TAG, "Button %d down.", i);
-//            led_->start_following();
+            led_->start_following();
             led_->flare(color);
-//            player_->start_playing(color);
+            player_->start_playing(color);
             button_down_times[i] = esp_timer_get_time();
             break;
 

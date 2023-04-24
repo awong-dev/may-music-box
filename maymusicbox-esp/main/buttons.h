@@ -68,7 +68,7 @@ class Buttons {
   ButtonState intr_old_button_state_ = {};
 
   // This just tells the system to wake up.
-  QueueHandle_t sample_queue_ = xQueueCreate(3, sizeof(ButtonState));
+  QueueHandle_t sample_queue_ = xQueueCreate(10, sizeof(ButtonState));
   static void IRAM_ATTR on_interrupt(void *args); 
   void IRAM_ATTR disable_interrupts() const;
   void enable_interrupts() const; 

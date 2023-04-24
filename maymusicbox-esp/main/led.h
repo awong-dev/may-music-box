@@ -13,6 +13,7 @@ class Led {
  public:
   Led();
   void flare(SongColor color);
+  void dim_to_on(SongColor color);
   void flare_all_and_follow();
 
   void set_to_follow(SongColor color);
@@ -26,7 +27,8 @@ class Led {
   enum class Action : int {
     Nothing = 0,
     FlareToMax,
-    DimTo80,
+    FlareToMaxThenDim,
+    DimToOn,
     SampleRingbuf,
   };
   struct LedCommand {
@@ -49,20 +51,18 @@ class Led {
     GPIO_NUM_15,
   };
 
-  // Pin order follows SongColor int values. Last member is "audio" channel.
-  static DRAM_ATTR constexpr std::array<ledc_channel_t, kNumColors + 1> channel_list_ = {
+  // Pin order follows SongColor int values.
+  static DRAM_ATTR constexpr std::array<ledc_channel_t, kNumColors> channel_list_ = {
     LEDC_CHANNEL_0,
     LEDC_CHANNEL_1,
     LEDC_CHANNEL_2,
     LEDC_CHANNEL_3,
     LEDC_CHANNEL_4,
     LEDC_CHANNEL_5,
-    LEDC_CHANNEL_6,
   };
 
   QueueHandle_t led_queue_ = xQueueCreate(10, sizeof(LedCommand));
   std::array<std::atomic<Action>, channel_list_.size()> channel_current_action_{
-    Action::Nothing,
     Action::Nothing,
     Action::Nothing,
     Action::Nothing,
@@ -84,7 +84,7 @@ class Led {
 
   void flare_channel(ledc_channel_t channel);
 
-  void config_following();
+  void config_follow_timer();
 
   void led_task();
 };
