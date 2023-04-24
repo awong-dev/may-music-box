@@ -5,16 +5,22 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/gpio.h"
 #include "driver/periph_ctrl.h"
 #include "driver/timer.h"
+#include "esp_log.h"
 
 #include "audio_player.h"
 #include "led.h"
-#include "logging.h"
+
+static DRAM_ATTR portMUX_TYPE g_intr_lock = portMUX_INITIALIZER_UNLOCKED;;
+static DRAM_ATTR bool g_is_servicing_button = false;
+
+static const char *TAG = "buttons";
 
 static DRAM_ATTR constexpr int kTimerDivider = 16;
 static DRAM_ATTR constexpr int kTimerScale = TIMER_BASE_CLK / kTimerDivider;
-static DRAM_ATTR constexpr float kTimerInterval = (0.05/32); // 5ms total debounce
+static DRAM_ATTR constexpr float kTimerInterval = (0.005/32); // 5ms total debounce
 
 bool IRAM_ATTR Buttons::on_timer_interrupt(void* param) {
   Buttons* buttons = static_cast<Buttons*>(param);
@@ -35,10 +41,11 @@ bool IRAM_ATTR Buttons::on_timer_interrupt(void* param) {
     return true;
   }
 
-  return false;
+  return true;
 }
 
 void Buttons::start_sample_timer() {
+  // Configure Button Sample timer.
   timer_config_t config = {
     .alarm_en = TIMER_ALARM_EN,
     .counter_en = TIMER_PAUSE,
@@ -50,8 +57,8 @@ void Buttons::start_sample_timer() {
   timer_init(TIMER_GROUP_1, TIMER_0, &config);
   timer_set_counter_value(TIMER_GROUP_1, TIMER_0, 0);
   timer_set_alarm_value(TIMER_GROUP_1, TIMER_0, kTimerInterval * kTimerScale);
-  timer_enable_intr(TIMER_GROUP_1, TIMER_0);
   timer_isr_callback_add(TIMER_GROUP_1, TIMER_0, &Buttons::on_timer_interrupt, this, 0);
+  timer_enable_intr(TIMER_GROUP_1, TIMER_0);
 
   // Reset sampling state. Safe to do before timer starts.
   intr_history_[0] = 0xFFFFFFFF;
@@ -107,6 +114,7 @@ Buttons::Buttons(AudioPlayer *player, Led* led) : player_(player), led_(led) {
 
   ESP_LOGI(TAG, "Enabling button interrupts");
   enable_interrupts();
+
 }
 
 // Impelement the Hackaday debounce method.
@@ -142,26 +150,30 @@ const uint64_t Buttons::kLongPressUs;
 
 // This just tells the system to wake up.
 void IRAM_ATTR Buttons::on_interrupt(void *args) {
-    Buttons* buttons = static_cast<Buttons*>(args);
-    buttons->disable_interrupts();
-    buttons->wake();
+  Buttons* buttons = static_cast<Buttons*>(args);
+  char dummy = 0;
+  taskENTER_CRITICAL_ISR(&g_intr_lock);
+  if (xQueueSendFromISR(buttons->wake_queue_, &dummy, NULL) == pdTRUE) {
+    if (!g_is_servicing_button) {
+      buttons->disable_interrupts();
+    }
+  }
+  taskEXIT_CRITICAL_ISR(&g_intr_lock);
 }
 
 void Buttons::enable_interrupts() const {
+  taskENTER_CRITICAL(&g_intr_lock);
+  g_is_servicing_button = false;
   for (int i = 0; i < kNumColors; i++) {
     gpio_intr_enable(button_gpio_list_[i]);
   }
+  taskEXIT_CRITICAL(&g_intr_lock);
 }
 
 void IRAM_ATTR Buttons::disable_interrupts() const {
   for (int i = 0; i < kNumColors; i++) {
     gpio_intr_disable(button_gpio_list_[i]);
   }
-}
-
-void IRAM_ATTR Buttons::wake() {
-  char dummy = 0;
-  xQueueSendFromISR(wake_queue_, &dummy, NULL);
 }
 
 void IRAM_ATTR Buttons::push_history_bit(SongColor b, bool value) {
@@ -206,6 +218,10 @@ void Buttons::process_buttons() {
   int dummy;
   while (1) {
     xQueueReceive(wake_queue_, &dummy, portMAX_DELAY);
+    taskENTER_CRITICAL(&g_intr_lock);
+    g_is_servicing_button = true;
+    taskEXIT_CRITICAL(&g_intr_lock);
+
 
       // Just woke... time to read button state and turn into a command.
     start_sample_timer();
@@ -239,8 +255,9 @@ void Buttons::process_buttons() {
 
           case ButtonEvent::Down:
             ESP_LOGI(TAG, "Button %d down.", i);
+            led_->start_following();
             led_->flare(color);
-            player_->start_playing(color);
+//            player_->start_playing(color);
             button_down_times[i] = esp_timer_get_time();
             break;
 
@@ -266,9 +283,8 @@ void Buttons::process_buttons() {
       prev_bs = bs;
     } while (!bs.all_off());
     stop_sample_timer();
+    ESP_LOGI(TAG, "All off, reenabling interrupts");
     enable_interrupts();
-
-    ESP_LOGI(TAG, "All off");
   }
 }
 

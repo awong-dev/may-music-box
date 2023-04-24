@@ -1,6 +1,5 @@
 #include "audio_player.h"
 
-//#include "audio_hal.h"
 #include "audio_def.h"
 #include "audio_element.h"
 #include "audio_pipeline.h"
@@ -13,7 +12,7 @@
 #include "logging.h"
 #include "led_downmix.h"
 
-AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf) {
+AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
   ESP_LOGI(TAG, "[4.0] Create audio pipeline for playback");
   audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
   pipeline_ = audio_pipeline_init(&pipeline_cfg);
@@ -33,14 +32,13 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf) {
   ESP_LOGI(TAG, "[4.3] Create led downmix filter");
   led_downmix_cfg_t led_downmix_cfg = DEFAULT_LED_DOWNMIX_CONFIG();
   led_downmix_cfg.follow_ringbuf = follow_ringbuf;
+  led_downmix_cfg.follow_rate = follow_rate;
   led_downmix_ = led_downmix_init(&led_downmix_cfg);
 
   ESP_LOGI(TAG, "[4.4] Create fatfs stream to read data from sdcard");
-  const char *url = "/sdcard/test.mp3";
   fatfs_stream_cfg_t fatfs_cfg = FATFS_STREAM_CFG_DEFAULT();
   fatfs_cfg.type = AUDIO_STREAM_READER;
   fatfs_stream_reader_ = fatfs_stream_init(&fatfs_cfg);
-  audio_element_set_uri(fatfs_stream_reader_, url);
 
   ESP_LOGI(TAG, "[4.5] Register all elements to audio pipeline");
   audio_pipeline_register(pipeline_, fatfs_stream_reader_, "file");
@@ -85,7 +83,7 @@ void AudioPlayer::start_playing(SongColor color) {
   audio_pipeline_reset_elements(pipeline_);
   audio_pipeline_change_state(pipeline_, AEL_STATE_INIT);
 
-  audio_pipeline_run(pipeline_);
+//  audio_pipeline_run(pipeline_);
 };
 
 esp_err_t AudioPlayer::set_volume(void *obj, int vol) {
@@ -104,7 +102,7 @@ void AudioPlayer::pipeline_task() {
   ESP_LOGI(TAG, "[7.1] Listen for all pipeline events");
   audio_pipeline_set_listener(pipeline_, evt);
 
-  audio_pipeline_run(pipeline_);
+//  audio_pipeline_run(pipeline_);
 
   while (1) {
     /* Handle event interface messages from pipeline

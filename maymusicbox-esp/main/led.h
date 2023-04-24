@@ -4,6 +4,7 @@
 #include "song.h"
 
 #include <array>
+#include <atomic>
 
 #include "driver/ledc.h"
 #include "ringbuf.h"
@@ -15,19 +16,21 @@ class Led {
   void flare_all_and_follow();
 
   void set_to_follow(SongColor color);
-  void start_following(ringbuf_handle_t buf);
+  void start_following();
 
   // Follow ringbuf info.
-  static inline constexpr int kFollowRateHz = 1000; // Window at 1000hz sample.
+  static inline constexpr int kFollowRateHz = 100; // Window at 1000hz sample.
   ringbuf_handle_t follow_ringbuf() const { return follow_ringbuf_; }
 
  private:
+  enum class Action : int {
+    Nothing = 0,
+    FlareToMax,
+    DimTo80,
+    SampleRingbuf,
+  };
   struct LedCommand {
-    enum Action {
-      FlareToMax,
-      DimTo80,
-      SampleRingbuf,
-    } action = {};
+    Action action = Action::Nothing;
     ledc_channel_t channel = {};
     uint32_t current_duty = {};
 
@@ -35,11 +38,6 @@ class Led {
     LedCommand(Action action, ledc_channel_t channel, uint32_t currnt_duty)
       : action(action), channel(channel), current_duty(currnt_duty) {}
   };
-  QueueHandle_t led_queue_ = xQueueCreate(10, sizeof(LedCommand));
-
-  // Handle up to 96khz samples. Add padding of 3 samples just because.
-  ringbuf_handle_t follow_ringbuf_ = rb_create(sizeof(int16_t), (96000 / kFollowRateHz) + 3);
-  bool is_following_ = false;
 
   // Pin order follows SongColor int values.
   static DRAM_ATTR constexpr std::array<gpio_num_t, kNumColors> led_gpio_list_ = {
@@ -61,6 +59,21 @@ class Led {
     LEDC_CHANNEL_5,
     LEDC_CHANNEL_6,
   };
+
+  QueueHandle_t led_queue_ = xQueueCreate(10, sizeof(LedCommand));
+  std::array<std::atomic<Action>, channel_list_.size()> channel_current_action_{
+    Action::Nothing,
+    Action::Nothing,
+    Action::Nothing,
+    Action::Nothing,
+    Action::Nothing,
+    Action::Nothing,
+    Action::Nothing,
+  };
+
+  // Handle up to 96khz samples. Add padding of 3 samples just because.
+  ringbuf_handle_t follow_ringbuf_ = rb_create(sizeof(int16_t), (96000 / kFollowRateHz) + 3);
+  bool is_following_ = false;
 
   static void led_task_thunk(void *param) {
     static_cast<Led*>(param)->led_task();

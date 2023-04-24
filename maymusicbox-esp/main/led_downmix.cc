@@ -104,6 +104,11 @@ static audio_element_err_t led_downmix_process(audio_element_handle_t self, char
       audio_element_info_t music_info = {};
       audio_element_getinfo(self, &music_info);
 
+      // During init, the music_info isn't set. Skip the processing to avoid divide-by-zero issues.
+      if (music_info.sample_rates == 0 || music_info.bits == 0 || music_info.channels == 0){
+        return r_size;
+      }
+
       assert(music_info.bits % 8 == 0);
       int frame_bytes = music_info.channels * (music_info.bits / 8);
       assert(r_size % frame_bytes == 0);

@@ -129,7 +129,7 @@ extern "C" void app_main(void)
   Led led;
   led.flare_all_and_follow();
 
-  AudioPlayer player(led.follow_ringbuf());
+  AudioPlayer player(led.follow_ringbuf(), Led::kFollowRateHz);
   Buttons buttons(&player, &led);
 
   configure_rtc_wake();
