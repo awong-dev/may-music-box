@@ -64,7 +64,7 @@ Led::Led() {
   for (ledc_channel_t ch : channel_list_) {
     ledc_cb_register(kLedcSpeedMode, ch, &cbs, this);
   }
-  xTaskCreate(&Led::led_task_thunk, "led_task", 4096, this, configMAX_PRIORITIES -1, NULL);
+//  xTaskCreate(&Led::led_task_thunk, "led_task", 4096, this, 0, NULL);
 }
 
 void Led::flare(SongColor color) {
@@ -104,26 +104,27 @@ void Led::config_following() {
       .intr_type = TIMER_INTR_LEVEL,
       .counter_dir = TIMER_COUNT_UP,
       .auto_reload = TIMER_AUTORELOAD_EN,
-      .divider = 10,
+      .divider = 16,
   };
   ESP_ERROR_CHECK(timer_init(TIMER_GROUP_1, TIMER_1, &timer_config));
 
   /* Configure the alarm value and the interrupt on alarm. */
   static DRAM_ATTR constexpr int kTimerDivider = 10;
-  timer_set_alarm_value(TIMER_GROUP_1, TIMER_1, TIMER_BASE_CLK / kTimerDivider / kFollowRateHz);
+  static DRAM_ATTR constexpr int kTimerScale = TIMER_BASE_CLK / kTimerDivider;
+  static DRAM_ATTR constexpr float kTimerInterval = (1.0/kFollowRateHz)*100;
 
-//  timer_enable_intr(TIMER_GROUP_1, TIMER_1);
+  timer_set_alarm_value(TIMER_GROUP_1, TIMER_1,  kTimerInterval * kTimerScale);
+  timer_enable_intr(TIMER_GROUP_1, TIMER_1);
 
 // TODO: This runs too frequently.
-//  timer_isr_callback_add(TIMER_GROUP_1, TIMER_1, &Led::on_follow_intr_, this, 0);
+  timer_isr_callback_add(TIMER_GROUP_1, TIMER_1, &Led::on_follow_intr_, this, 0);
+
+  timer_set_counter_value(TIMER_GROUP_1, TIMER_1, 0);
+//  timer_start(TIMER_GROUP_1, TIMER_1);
 }
 
 void Led::start_following() {
   is_following_ = true;
-
-  timer_set_counter_value(TIMER_GROUP_1, TIMER_1, 0);
-
-//  timer_start(TIMER_GROUP_1, TIMER_1);
 }
 
 bool IRAM_ATTR Led::on_follow_intr_(void *param) {
@@ -141,10 +142,10 @@ bool Led::on_led_intr_(const ledc_cb_param_t *param, void *user_arg) {
     if (last_action == Action::FlareToMax) {
       LedCommand c(Action::DimTo80, static_cast<ledc_channel_t>(param->channel), 0);
       xQueueSendFromISR(led->led_queue_, &c, 0);
-//      return true;
+      return true;
     }
   }
-  return true;
+  return false;
 }
 
 void Led::flare_channel(ledc_channel_t channel) {
@@ -164,8 +165,8 @@ void Led::led_task() {
       continue;
     }
     channel_current_action_[command.channel] = command.action;
-//    ESP_LOGI(TAG, "Channel %d open. Sending command %d",
-//        command.channel, static_cast<int>(command.action));
+    ESP_LOGI(TAG, "Channel %d open. Sending command %d",
+        command.channel, static_cast<int>(command.action));
     switch (command.action) {
       case Action::FlareToMax:
         ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
@@ -188,7 +189,7 @@ void Led::led_task() {
       break;
 
       case Action::SampleRingbuf:
-        if (is_following_) {
+        if (false &&is_following_) {
           int16_t val;
           if (rb_bytes_available(follow_ringbuf_) > sizeof(val)) {
             rb_read(follow_ringbuf_, reinterpret_cast<char*>(&val), sizeof(val), 0);

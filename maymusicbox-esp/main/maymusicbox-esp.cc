@@ -119,6 +119,11 @@ void configure_rtc_wake(void) {
   // Set up RTC wake for IO 32,33,34,35,36,39
 }
 
+void run_buttons(void* param) {
+  Buttons* buttons = static_cast<Buttons*>(param);
+  buttons->process_buttons();
+}
+
 extern "C" void app_main(void)
 {
   // Unused pin. Set to output.
@@ -134,5 +139,8 @@ extern "C" void app_main(void)
 
   configure_rtc_wake();
 
-  buttons.process_buttons();
+  xTaskCreate(&run_buttons, "button_task", 4096, &buttons, 32, NULL);
+  while (1) {
+    vTaskDelay(portTICK_PERIOD_MS);
+  }
 }
