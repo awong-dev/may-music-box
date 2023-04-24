@@ -8,6 +8,7 @@
 
 #include "song.h"
 
+#include <array>
 #include <atomic>
 
 class AudioPlayer;
@@ -55,7 +56,7 @@ class Buttons {
 
  private:
   // Pin order follows SongColor int values.
-  static DRAM_ATTR const gpio_num_t button_gpio_list_[kNumColors];
+  static DRAM_ATTR const std::array<gpio_num_t, kNumColors> button_gpio_list_;
   static const uint64_t kLongPressUs = 30*1000*1000;
 
   QueueHandle_t wake_queue_ = xQueueCreate(1, sizeof(char));

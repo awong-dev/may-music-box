@@ -1,6 +1,7 @@
 #include "led.h"
 
 #include <stdint.h>
+#include <math.h>
 
 #include "esp_log.h"
 #include "raw_stream.h"
@@ -13,8 +14,8 @@ namespace {
 constexpr ledc_timer_t kLedcTimer= LEDC_TIMER_1;
 constexpr ledc_mode_t kLedcSpeedMode = LEDC_HIGH_SPEED_MODE;
 constexpr ledc_timer_bit_t kLedcDutyResolution = LEDC_TIMER_10_BIT;
-constexpr uint32_t kLedcFrequency = 25000; // 25 kHz. Flicker free per Waveform lighting.
-constexpr uint32_t kMaxDuty = ((1UL << kLedcDutyResolution) - 1);
+constexpr int32_t kLedcFrequency = 25000; // 25 kHz. Flicker free per Waveform lighting.
+constexpr int32_t kMaxDuty = ((1UL << kLedcDutyResolution) - 1);
 
 ledc_channel_config_t default_channel_config() {
   ledc_channel_config_t channel_config = {};
@@ -25,6 +26,15 @@ ledc_channel_config_t default_channel_config() {
   channel_config.hpoint = 0;
   return channel_config;
 }
+
+struct TsVal {
+  int32_t ts;
+  Led::FollowSample s;
+};
+
+constexpr int kLogEntries = 4000;
+std::array<TsVal, kLogEntries> f_led_values;
+int f_num_led_values = 0;
 
 }  // namespace
 
@@ -75,7 +85,7 @@ Led::Led() {
   for (ledc_channel_t ch : channel_list_) {
     ledc_cb_register(kLedcSpeedMode, ch, &cbs, this);
   }
-  xTaskCreate(&Led::led_task_thunk, "led_task", 4096, this, 0, NULL);
+  xTaskCreate(&Led::led_task_thunk, "led_task", 4096, this, 5, NULL);
 }
 
 void Led::flare(SongColor color) {
@@ -107,6 +117,7 @@ void Led::set_to_follow(SongColor color) {
 }
 
 void Led::config_follow_timer() {
+/*
   // Begin a 1khz timer that reads data off the ringbuf.
   timer_config_t timer_config = {
       .alarm_en = TIMER_ALARM_EN,
@@ -118,31 +129,44 @@ void Led::config_follow_timer() {
   };
   ESP_ERROR_CHECK(timer_init(TIMER_GROUP_1, TIMER_1, &timer_config));
 
-  /* Configure the alarm value and the interrupt on alarm. */
+  // Configure the alarm value and the interrupt on alarm.
   static DRAM_ATTR constexpr int kTimerDivider = 10;
-  static DRAM_ATTR constexpr int kTimerScale = TIMER_BASE_CLK / kTimerDivider;
-  static DRAM_ATTR constexpr float kTimerInterval = (1.0/kFollowRateHz)*100;
+  static DRAM_ATTR constexpr int kTimerScaleHz = TIMER_BASE_CLK / kTimerDivider;
+  static DRAM_ATTR constexpr float kTimerInterval = (1.0/kFollowRateHz);
 
-  timer_set_alarm_value(TIMER_GROUP_1, TIMER_1,  kTimerInterval * kTimerScale);
-  timer_enable_intr(TIMER_GROUP_1, TIMER_1);
+  timer_set_counter_value(TIMER_GROUP_1, TIMER_1, 0);
+  timer_set_alarm_value(TIMER_GROUP_1, TIMER_1,  kTimerInterval * kTimerScaleHz);
 
 // TODO: This runs too frequently.
   timer_isr_callback_add(TIMER_GROUP_1, TIMER_1, &Led::on_follow_intr_, this, 0);
 
-  timer_set_counter_value(TIMER_GROUP_1, TIMER_1, 0);
-//  timer_start(TIMER_GROUP_1, TIMER_1);
+  timer_enable_intr(TIMER_GROUP_1, TIMER_1);
+  timer_start(TIMER_GROUP_1, TIMER_1);
+  */
+
+  esp_timer_create_args_t timer_args = {};
+  timer_args.callback = &Led::on_follow_intr_;
+  timer_args.arg = this;
+  timer_args.name = "samplerb";
+  timer_args.dispatch_method = ESP_TIMER_ISR;
+  timer_args.skip_unhandled_events = true;
+
+  esp_timer_create(&timer_args, &follow_timer_);
+  int64_t rate_us = (1ULL * 10000000)/kFollowRateHz;
+  ESP_LOGI(TAG, "Following every %lldus", rate_us);
+  esp_timer_start_periodic(follow_timer_, (1ULL * 1000000)/kFollowRateHz);
 }
 
 void Led::start_following() {
   is_following_ = true;
 }
 
-bool IRAM_ATTR Led::on_follow_intr_(void *param) {
+void IRAM_ATTR Led::on_follow_intr_(void *param) {
   Led* led = static_cast<Led*>(param);
   // Channel is ignored for SampleRingbuf. All channels are populated.
   LedCommand c(Action::SampleRingbuf, channel_list_.front(), 0);
   xQueueSendFromISR(led->led_queue_, &c, 0);
-  return true;
+//  return true;
 }
 
 bool Led::on_led_intr_(const ledc_cb_param_t *param, void *user_arg) {
@@ -169,14 +193,14 @@ void Led::led_task() {
 //    ESP_LOGI(TAG, "led Waiting for command");
     LedCommand command;
     xQueueReceive(led_queue_, &command, portMAX_DELAY);
-    if (channel_current_action_[command.channel] != Action::Nothing) {
-//      ESP_LOGI(TAG, "Channel %d busy. Skipping command %d",
-//          command.channel, static_cast<int>(command.action));
+    if (command.action != Action::SampleRingbuf && channel_current_action_[command.channel] != Action::Nothing) {
+      ESP_LOGI(TAG, "Channel %d busy. Skipping command %d",
+          command.channel, static_cast<int>(command.action));
       continue;
     }
     channel_current_action_[command.channel] = command.action;
-    ESP_LOGI(TAG, "Channel %d open. Sending command %d",
-        command.channel, static_cast<int>(command.action));
+//    ESP_LOGI(TAG, "Channel %d open. Sending command %d",
+//        command.channel, static_cast<int>(command.action));
     switch (command.action) {
       case Action::FlareToMax:
       case Action::FlareToMaxThenDim:
@@ -199,30 +223,83 @@ void Led::led_task() {
             LEDC_FADE_NO_WAIT));
       break;
 
-      case Action::SampleRingbuf:
-        if (is_following_) {
-          int16_t val;
-          if (rb_bytes_available(follow_ringbuf_) > sizeof(val)) {
-            rb_read(follow_ringbuf_, reinterpret_cast<char*>(&val), sizeof(val), 0);
-            uint32_t power = val;
-            power *= power;
-            float percent = power;
-            // TODO: Fix math.
-            percent /= std::numeric_limits<uint32_t>::max();
-            ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
+      case Action::SampleRingbuf: {
+        FollowSample s;
+        bool last_sample = false;
+
+        // Degrade it.
+        int target_duty = std::max(0, cur_duty_ - 10);
+        
+//        ESP_LOGI(TAG, "S");
+        if (rb_bytes_available(follow_ringbuf_) >= sizeof(s)) {
+          rb_read(follow_ringbuf_, reinterpret_cast<char*>(&s), sizeof(s), 1 / portTICK_PERIOD_MS);
+          if (f_num_led_values < f_led_values.size()) {
+            f_led_values[f_num_led_values].ts = static_cast<int32_t>(esp_timer_get_time() / 1000);
+            f_led_values[f_num_led_values].s = s;
+            f_num_led_values++;
+          }
+          static int s_last_follow_frame_no = 0;
+          if (s.n < 0) {
+            s.n = -s.n;
+            last_sample = true;
+          }
+          if (s.n > (s_last_follow_frame_no + 1)) {
+            ESP_LOGI(TAG, "l:%d n: %d v:%d", s_last_follow_frame_no, s.n, s.volume);
+          }
+          s_last_follow_frame_no = s.n;
+          float percent = s.volume;
+          // TODO: Fix math.
+          percent = sqrt(percent);
+          percent /= std::numeric_limits<int16_t>::max()/4;
+          percent = std::min(percent, 1.0f);
+
+          int new_duty = kMaxDuty * percent;
+          // It's a new peak so update.
+          if (new_duty > target_duty) {
+            target_duty = new_duty;
+          }
+//          ESP_LOGI(TAG, "t:%d n: %d v:%d p:%f", target_duty, new_duty, volume, percent);
+        }
+
+        static constexpr int kNumCyclesInSample = (kLedcFrequency / kFollowRateHz);
+        int scale = 1 + abs((target_duty - cur_duty_)) / (kNumCyclesInSample);
+
+//        ESP_LOGI(TAG, "s:%d, d:%d, r:%d", scale, target_duty - cur_duty_, (kLedcFrequency / kFollowRateHz));
+        for (ledc_channel_t ch : channel_list_) {
+          ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
                 kLedcSpeedMode,
-                command.channel,
-                kMaxDuty * percent,
-                100,  // TODO: Spread it over 1khz.
+                ch,
+                target_duty,
+                scale,
                 1,
                 LEDC_FADE_NO_WAIT));
-          }
         }
+        cur_duty_ = target_duty;
+        if (last_sample) {
+          print_led_times();
+        }
+      }
       break;
 
       case Action::Nothing:
       break;
     }
-
   }
+}
+
+void Led::print_led_times() {
+  float delta = 0;
+  int n_d = 0;
+  for (int i = 0; i < f_num_led_values; ++i) {
+    const auto& x = f_led_values[i];
+    int d = 0;
+    if (i > 0) {
+      d = x.ts - f_led_values[i-1].ts;
+      delta += d;
+      n_d++;
+    }
+//    ESP_LOGI(TAG, "L: ts:%d, d:%d, n:%d, v:%d", x.ts, d, x.s.n, x.s.volume);
+  }
+  float sum = delta / n_d;
+  ESP_LOGI(TAG, "L: a.ts:%f, a.hz:%f", sum, 1000/sum);
 }

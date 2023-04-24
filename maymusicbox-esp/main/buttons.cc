@@ -142,7 +142,7 @@ bool Buttons::is_on(SongColor color) {
   return h == 0;
 }
 
-const gpio_num_t Buttons::button_gpio_list_[] = {
+const std::array<gpio_num_t, kNumColors> Buttons::button_gpio_list_{
   GPIO_NUM_33,
   GPIO_NUM_32,
   GPIO_NUM_35,

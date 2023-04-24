@@ -7,6 +7,7 @@
 #include <atomic>
 
 #include "driver/ledc.h"
+#include "esp_timer.h"
 #include "ringbuf.h"
 
 class Led {
@@ -18,9 +19,14 @@ class Led {
 
   void set_to_follow(SongColor color);
   void start_following();
+  void print_led_times();
 
   // Follow ringbuf info.
-  static inline constexpr int kFollowRateHz = 100; // Window at 1000hz sample.
+  static inline constexpr int kFollowRateHz = 300; // Window at 1000hz sample.
+  struct FollowSample {
+    int n;
+    int16_t volume;
+  };
   ringbuf_handle_t follow_ringbuf() const { return follow_ringbuf_; }
 
  private:
@@ -71,16 +77,19 @@ class Led {
     Action::Nothing,
   };
 
-  // Handle up to 96khz samples. Add padding of 3 samples just because.
-  ringbuf_handle_t follow_ringbuf_ = rb_create(sizeof(int16_t), (96000 / kFollowRateHz) + 3);
+  // Handle up to 96khz power values. Add padding of 3 values just because.
+  ringbuf_handle_t follow_ringbuf_ = rb_create(sizeof(FollowSample), (96000 / kFollowRateHz) + 3);
+//  ringbuf_handle_t follow_ringbuf_ = rb_create(sizeof(FollowSample), 100);
   bool is_following_ = false;
+  int cur_duty_ = 0;
+  esp_timer_handle_t follow_timer_ = nullptr;
 
   static void led_task_thunk(void *param) {
     static_cast<Led*>(param)->led_task();
   }
 
   static bool IRAM_ATTR on_led_intr_(const ledc_cb_param_t *param, void *user_arg);
-  static bool IRAM_ATTR on_follow_intr_(void *param);
+  static void IRAM_ATTR on_follow_intr_(void *param);
 
   void flare_channel(ledc_channel_t channel);
 

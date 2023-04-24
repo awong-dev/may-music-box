@@ -8,6 +8,7 @@
 #include "audio_element.h"
 #include "led_downmix.h"
 #include "audio_type_def.h"
+#include "led.h"
 
 static const char *TAG = "LED_DOWNMIX";
 
@@ -24,7 +25,7 @@ typedef struct led_downmix {
     uint32_t follow_window_frames_remainder;  // left-over from samplerate / follow_rate to ensure sync. This is a hack for 44.1 khz.
     uint32_t follow_windows_accumulated;  // Number of windows that have been sent
     uint32_t follow_frames_accumulated;  // Number of frames accumulated.
-    int32_t follow_accumulate;
+    uint16_t follow_accumulate;
 } led_downmix_t;
 
 static void setup_led_follow_values(led_downmix_t* led_downmix) {
@@ -113,13 +114,15 @@ static audio_element_err_t led_downmix_process(audio_element_handle_t self, char
       int frame_bytes = music_info.channels * (music_info.bits / 8);
       assert(r_size % frame_bytes == 0);
       int num_frames = r_size / frame_bytes;
+      static int s_total_frames = 0;
+      s_total_frames += num_frames;
+//      ESP_LOGI(TAG, "TF:%d", s_total_frames);
       for (int i = 0; i < num_frames; ++i) {
-        // Downmix all channels.
+        // Downmix all channels by summing attenuated signals.
         int32_t val = 0;
         for (int ch = 0; ch < music_info.channels; ++ch) {
-          val += led_downmix->buf[i * music_info.channels + ch];
+          val += led_downmix->buf[i * music_info.channels + ch] / music_info.channels;
         }
-        val = val / music_info.channels;
 
         // Write downmixed value back into each channel to not change stream format.
         // TODO: Try just setting i2s_stream_writer_'s writer in audio_player.cc to 1 channel.
@@ -132,16 +135,28 @@ static audio_element_err_t led_downmix_process(audio_element_handle_t self, char
         if (led_downmix->follow_windows_accumulated % 10) {
           frames_to_accumulate += led_downmix->follow_window_frames_remainder;
         }
-        led_downmix->follow_accumulate += val;
+
+        // Add attenuated signals.
+        led_downmix->follow_accumulate += abs(val) / frames_to_accumulate;
         led_downmix->follow_frames_accumulated++;
 
         // If a window is complete, write it out and reset.
         if (led_downmix->at_eof || led_downmix->follow_frames_accumulated == frames_to_accumulate) {
-          int16_t follow_avg = static_cast<int16_t>(led_downmix->follow_accumulate / led_downmix->follow_frames_accumulated);
-          rb_write(led_downmix->follow_ringbuf,
-              reinterpret_cast<char*>(&follow_avg),
-              sizeof(follow_avg),
-              0);
+//          ESP_LOGI(TAG, "F %d", led_downmix->follow_accumulate);
+          Led::FollowSample s;
+          static int s_follow_frame_no = 0;
+          s.n = s_follow_frame_no++;
+          if (led_downmix->at_eof) {
+          ESP_LOGI(TAG, "Finishing");
+            s.n = - s.n;
+          }
+          s.volume = led_downmix->follow_accumulate;
+          if (rb_write(led_downmix->follow_ringbuf,
+              reinterpret_cast<char*>(&s),
+              sizeof(s),
+              0) < sizeof(s)) {
+            ESP_LOGI(TAG, "! n:%d", s.n);
+          }
           led_downmix->follow_windows_accumulated++;
           led_downmix->follow_accumulate = 0;
           led_downmix->follow_frames_accumulated = 0;

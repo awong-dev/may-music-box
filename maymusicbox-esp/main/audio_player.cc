@@ -83,7 +83,7 @@ void AudioPlayer::start_playing(SongColor color) {
   audio_pipeline_reset_elements(pipeline_);
   audio_pipeline_change_state(pipeline_, AEL_STATE_INIT);
 
-//  audio_pipeline_run(pipeline_);
+  audio_pipeline_run(pipeline_);
 };
 
 esp_err_t AudioPlayer::set_volume(void *obj, int vol) {
@@ -102,7 +102,7 @@ void AudioPlayer::pipeline_task() {
   ESP_LOGI(TAG, "[7.1] Listen for all pipeline events");
   audio_pipeline_set_listener(pipeline_, evt);
 
-//  audio_pipeline_run(pipeline_);
+  audio_pipeline_run(pipeline_);
 
   while (1) {
     /* Handle event interface messages from pipeline
