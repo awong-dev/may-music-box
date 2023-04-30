@@ -13,8 +13,8 @@ namespace {
 
 constexpr ledc_timer_t kLedcTimer= LEDC_TIMER_1;
 constexpr ledc_mode_t kLedcSpeedMode = LEDC_HIGH_SPEED_MODE;
-constexpr ledc_timer_bit_t kLedcDutyResolution = LEDC_TIMER_10_BIT;
-constexpr int32_t kLedcFrequency = 25000; // 25 kHz. Flicker free per Waveform lighting.
+constexpr ledc_timer_bit_t kLedcDutyResolution = LEDC_TIMER_11_BIT;
+constexpr int32_t kLedcFrequencyHz = 30000; // Flicker free per Waveform lighting is > 25khz. Use 30khz..
 constexpr int32_t kMaxDuty = ((1UL << kLedcDutyResolution) - 1);
 
 ledc_channel_config_t default_channel_config() {
@@ -61,7 +61,7 @@ Led::Led() {
       .speed_mode       = kLedcSpeedMode,
       .duty_resolution  = kLedcDutyResolution,
       .timer_num        = kLedcTimer,
-      .freq_hz          = kLedcFrequency,  // Set output frequency at 5 kHz
+      .freq_hz          = kLedcFrequencyHz,  // Set output frequency at 5 kHz
       .clk_cfg          = LEDC_USE_APB_CLK,
   };
   ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
@@ -228,7 +228,14 @@ void Led::led_task() {
         bool last_sample = false;
 
         // Degrade it.
-        int target_duty = std::max(0, cur_duty_ - 10);
+        static int degrade_count = 0;
+        static constexpr int kDegradeSlope = 8;
+        int target_duty;
+        if (degrade_count++ % kDegradeSlope == 0) {
+          target_duty = std::max(0, cur_duty_ - 1);
+        } else {
+          target_duty = cur_duty_;
+        }
         
 //        ESP_LOGI(TAG, "S");
         if (rb_bytes_available(follow_ringbuf_) >= sizeof(s)) {
@@ -250,7 +257,8 @@ void Led::led_task() {
           float percent = s.volume;
           // TODO: Fix math.
           percent = sqrt(percent);
-          percent /= std::numeric_limits<int16_t>::max()/4;
+          // Compress volume range to make LED brigher.
+          percent /= std::numeric_limits<int16_t>::max()/8;
           percent = std::min(percent, 1.0f);
 
           int new_duty = kMaxDuty * percent;
@@ -261,10 +269,10 @@ void Led::led_task() {
 //          ESP_LOGI(TAG, "t:%d n: %d v:%d p:%f", target_duty, new_duty, volume, percent);
         }
 
-        static constexpr int kNumCyclesInSample = (kLedcFrequency / kFollowRateHz);
+        static constexpr int kNumCyclesInSample = (kLedcFrequencyHz / kFollowRateHz);
         int scale = 1 + abs((target_duty - cur_duty_)) / (kNumCyclesInSample);
 
-//        ESP_LOGI(TAG, "s:%d, d:%d, r:%d", scale, target_duty - cur_duty_, (kLedcFrequency / kFollowRateHz));
+//        ESP_LOGI(TAG, "s:%d, d:%d, r:%d", scale, target_duty - cur_duty_, (kLedcFrequencyHz / kFollowRateHz));
         for (ledc_channel_t ch : channel_list_) {
           ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
                 kLedcSpeedMode,

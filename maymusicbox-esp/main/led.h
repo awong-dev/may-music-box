@@ -22,7 +22,7 @@ class Led {
   void print_led_times();
 
   // Follow ringbuf info.
-  static inline constexpr int kFollowRateHz = 300; // Window at 1000hz sample.
+  static inline constexpr int kFollowRateHz = 1000; // Window at 1000hz sample.
   struct FollowSample {
     int n;
     int16_t volume;
