@@ -12,6 +12,7 @@
 
 #include "audio_player.h"
 #include "led.h"
+#include "ulp_button_wake.h"
 
 static DRAM_ATTR portMUX_TYPE g_intr_lock = portMUX_INITIALIZER_UNLOCKED;;
 static DRAM_ATTR bool g_is_servicing_button = false;

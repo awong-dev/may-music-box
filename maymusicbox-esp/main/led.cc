@@ -229,7 +229,7 @@ void Led::led_task() {
 
         // Degrade it.
         static int degrade_count = 0;
-        static constexpr int kDegradeSlope = 8;
+        static constexpr int kDegradeSlope = 10;
         int target_duty;
         if (degrade_count++ % kDegradeSlope == 0) {
           target_duty = std::max(0, cur_duty_ - 1);
