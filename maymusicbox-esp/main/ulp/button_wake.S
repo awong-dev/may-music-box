@@ -1,11 +1,13 @@
 #include "soc/soc_ulp.h"
 #include "soc/rtc_io_reg.h"
 
-#define BUTTON_RTC_GPIO_MASK 0x01B9
+// rtc gpio 0 3 4 5 8 9
+// 0011 0011 1001
+#define BUTTON_RTC_GPIO_MASK 0x0339
 
 #define DEBOUNCE_MASK 0xF00F
-#define DEBOUNCE_UP ((0x1FFF) & DEBOUNCE_MASK)
-#define DEBOUNCE_DOWN ((0xFFF8) & DEBOUNCE_MASK)
+#define DEBOUNCE_UP ((0xFFFF >> 2) & DEBOUNCE_MASK)
+#define DEBOUNCE_DOWN ((0xFFFF << 14) & DEBOUNCE_MASK)
 
         .global samples_filled
         .bss
@@ -16,6 +18,17 @@ samples_filled:
 button_state:
         .long 0
 
+        .global debug_r0
+debug_r0:
+        .long 0
+
+        .global debug_r1
+debug_r1:
+        .long 0
+
+        .global debug_r2
+debug_r2:
+        .long 0
         .data
 // Definte a 16-bit button history. High-bytes are empty.
 // sw6 - rtc_gpio0
@@ -30,27 +43,43 @@ button_state:
 #define BUTTON_HISTORY_ENTRY_WORDS 2
         .global button_history
 button_history:
+        .global button_history0
+button_history0:
         .long 0
         .long 0x0000FFFF
+        .global button_history1
+button_history1:
         .long 3
         .long 0x0000FFFF
+        .global button_history2
+button_history2:
         .long 4
         .long 0x0000FFFF
+        .global button_history3
+button_history3:
         .long 5
         .long 0x0000FFFF
+        .global button_history4
+button_history4:
         .long 9
         .long 0x0000FFFF
+        .global button_history5
+button_history5:
         .long 8
         .long 0x0000FFFF
-button_history_end:
-
 
 // Program code here.
         .text
         .global entry
 entry:
-        JUMPS slow_poll, 0, EQ
-        JUMPS sample_buttons, 1, EQ
+//        MOVE R0, samples_filled
+//        LD R1, R0, 0
+//        ADD R1, R1, 1
+//        ST R1, R0, 0
+//        HALT
+
+        JUMPS slow_poll, 1, LT
+        JUMPS sample_buttons, 2, LT
         // On unknown stage, reset to 0 and halt.
         JUMP start_slow_poll
 
@@ -66,7 +95,9 @@ slow_poll:
         // Sample all the GPIOs now and start_sampling if any
         // of them are on.
         READ_RTC_REG(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT_S, 16)
-        AND R0,R0, BUTTON_RTC_GPIO_MASK
+        AND R1, R0, BUTTON_RTC_GPIO_MASK
+        SUB R0, R1, BUTTON_RTC_GPIO_MASK  // Ensure none are set.
+
         JUMPR start_sampling, 0, GT
         HALT
 
@@ -77,12 +108,14 @@ start_sampling:
         ST R0, R1, 0
 
         // Reset history. This shouldn't be necessary, but let's be sure.
+        MOVE R0, 0
 reset_history:
-        MOVE R0, button_history
         MOVE R1, 0xFFFF
+        ADD R0, R0, button_history
         ST R1, R0, BUTTON_HISTORY_HISTORY_OFFSET
         ADD R0, R0, BUTTON_HISTORY_ENTRY_WORDS
-        JUMPR reset_history, button_history_end, LT
+        sub R0, R0, button_history
+        JUMPR reset_history, 12, LT
 
         // Reset button_state to 0
         MOVE R0, button_state
@@ -103,19 +136,18 @@ sample_buttons:
         READ_RTC_REG(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT_S, 16)
 
         // Set R1 = current gpio sample.
-        // Set R0 = address of first entry in history array.
-        MOVE R1, R0
-        MOVE R0, button_history
+        // Set R0 = entry offset from button_history
+        AND R1, R0, BUTTON_RTC_GPIO_MASK
+        MOVE R0, 0
 
 push_history:
         // Set R2 = pin number for entry
+        ADD R0, R0, button_history
         LD R2, R0, BUTTON_HISTORY_PIN_OFFSET
 
         // Set R3 = 1 if pin number is on in R1
-        MOVE R3, 1
-        LSH R3, R3, R2
-        AND R3, R1, R3
-        RSH R3, R3, R2
+        RSH R3, R1, R2
+        AND R3, R3, 1
         
         // Load R2 with the history and then OR R3 into it.
         LD R2, R0, BUTTON_HISTORY_HISTORY_OFFSET
@@ -123,45 +155,60 @@ push_history:
         OR R2, R2, R3
         ST R2, R0, BUTTON_HISTORY_HISTORY_OFFSET
 
-        // NOTE: R2 = cur history and R3 is open.
-
         // Move R0 forward to next entry
         ADD R0, R0, BUTTON_HISTORY_ENTRY_WORDS
-        JUMPR push_history, button_history_end, LT
+        SUB R0, R0, button_history
+        JUMPR push_history, 12, LT
 
         // All histories updated.
         // Increment samples filled counter and calculate button state.
-        // TODO: Fold button state calculation into previous loop.
+        // Folding button state calculation into previous loop takes
+        // too many registers.
         MOVE R0, samples_filled
         LD R1, R0, 0
         ADD R1, R1, 1
         ST R1, R0, 0
         MOVE R0, button_history
-debounce:
-        // Load history then save entry pointer to R3
-        LD R1, R0, BUTTON_HISTORY_HISTORY_OFFSET
-        AND R1, R1, DEBOUNCE_MASK
-        MOVE R3, R0
 
-        // Clear-up history if button is down.
-        SUB R0, R1, DEBOUNCE_DOWN
-        JUMPR debounce_on, 0, GT
+debounce:
+        // set R1 = current history
+        // set R3 = entry pointer
+        // set R2 = calculated on-off state used by debounce_next
+        // R0 is scratch plus conditional.
+        MOVE R3, R0
+        LD R1, R3, BUTTON_HISTORY_HISTORY_OFFSET
+
+        // Test if button is down.
+        AND R0, R1, DEBOUNCE_MASK
+        SUB R0, R0, DEBOUNCE_DOWN
+        JUMPR debounce_not_down, 0, GT
+
+        // Button is transitioning down. Set history to all down.
+        // Set R2 to off state.
         MOVE R2, 0
         ST R2, R3, BUTTON_HISTORY_HISTORY_OFFSET
-
-        // Set R2 to on/off state.
-        MOVE R2, 0
         JUMP debounce_next
 
-debounce_on:
-        SUB R0, R1, DEBOUNCE_UP
-        JUMPR debounce_next, 0, GT
+debounce_not_down:
+        AND R0, R1, DEBOUNCE_MASK
+        SUB R0, R0, DEBOUNCE_UP
+        JUMPR debounce_unknown, 0, GT
+
+        // Button is transitioning up. Set history to all up.
         MOVE R2, 0xFFFF
         ST R2, R3, BUTTON_HISTORY_HISTORY_OFFSET
 
-        // Set R2 to on/off state.
+        // Set R2 to on state.
         MOVE R2, 1
         JUMP debounce_next
+
+debounce_unknown:
+        // Default to off unless all bits are 0.
+        // Note this does NOT clean the history.
+        MOVE R2, 0
+        MOVE R0, R1
+        JUMPR debounce_next, 0, GT
+        MOVE R2, 1
 
 debounce_next:
         // Update the button state bitvector base on
@@ -174,7 +221,8 @@ debounce_next:
 
         // Restore and increment R0 by one entry
         ADD R0, R3, BUTTON_HISTORY_ENTRY_WORDS
-        JUMPR push_history, button_history_end, LT
+        SUB R0, R0, button_history
+        JUMPR debounce, 12, LT
 
         // Do not allow moving back to stage 0 if there haven't been enough samples.
         MOVE R0, samples_filled

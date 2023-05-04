@@ -13,6 +13,7 @@
 #include "audio_player.h"
 #include "led.h"
 #include "ulp_button_wake.h"
+#include "wake.h"
 
 static DRAM_ATTR portMUX_TYPE g_intr_lock = portMUX_INITIALIZER_UNLOCKED;;
 static DRAM_ATTR bool g_is_servicing_button = false;
@@ -22,6 +23,17 @@ static const char *TAG = "buttons";
 static DRAM_ATTR constexpr int kTimerDivider = 16;
 static DRAM_ATTR constexpr int kTimerScale = TIMER_BASE_CLK / kTimerDivider;
 static DRAM_ATTR constexpr float kTimerInterval = (0.005/32); // 5ms total debounce
+
+void IRAM_ATTR Buttons::on_ulp_interrupt(void* param) {
+  ButtonState bs;
+  bs.b0 = ulp_button_state & 0b00000001;
+  bs.b1 = ulp_button_state & 0b00000010;
+  bs.b2 = ulp_button_state & 0b00000100;
+  bs.b3 = ulp_button_state & 0b00001000;
+  bs.b4 = ulp_button_state & 0b00010000;
+  bs.b5 = ulp_button_state & 0b00100000;
+  xQueueSendFromISR(static_cast<Buttons*>(param)->sample_queue_, &bs, NULL);
+}
 
 bool IRAM_ATTR Buttons::on_timer_interrupt(void* param) {
   Buttons* buttons = static_cast<Buttons*>(param);
@@ -81,9 +93,7 @@ void Buttons::stop_sample_timer() {
   timer_pause(TIMER_GROUP_1, TIMER_0);
 }
 
-Buttons::Buttons(AudioPlayer *player, Led* led) : player_(player), led_(led) {
-  config_sample_timer();
-
+void Buttons::setup_gpio() {
   ESP_LOGI(TAG, "Configuring button GPIO");
   static const gpio_config_t button_pullup_pins = {
     .pin_bit_mask = (
@@ -121,6 +131,14 @@ Buttons::Buttons(AudioPlayer *player, Led* led) : player_(player), led_(led) {
 
   ESP_LOGI(TAG, "Enabling button interrupts");
   enable_interrupts();
+}
+
+Buttons::Buttons(AudioPlayer *player, Led* led) : player_(player), led_(led) {
+  ESP_ERROR_CHECK(register_button_wake_isr(&Buttons::on_ulp_interrupt, this));
+/*
+  config_sample_timer();
+  setup_gpio();
+  */
 }
 
 // Impelement the Hackaday debounce method.

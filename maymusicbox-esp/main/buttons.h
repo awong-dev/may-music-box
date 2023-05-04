@@ -82,7 +82,9 @@ class Buttons {
   bool IRAM_ATTR is_on(SongColor color);
   void IRAM_ATTR push_history_bit(SongColor b, bool value);
   void IRAM_ATTR sample_once();
+  static void IRAM_ATTR on_ulp_interrupt(void* param);
 
+  void setup_gpio();
 
   // This reads the button state and sends commands until all buttons are
   // released.

@@ -9,14 +9,15 @@
 #include <sys/unistd.h>
 #include <sys/stat.h>
 
+#include "esp_sleep.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 
+#include "audio_player.h"
 #include "buttons.h"
 #include "led.h"
-#include "audio_player.h"
-
 #include "logging.h"
+#include "wake.h"
 
 // Look at this as an example of 2 outputs.
 // https://github.com/espressif/esp-adf/blob/master/examples/advanced_examples/http_play_and_save_to_file/main/http_play_and_save_to_file.c
@@ -95,30 +96,6 @@ sdmmc_card_t* mount_sdcard() {
   return card;
 }
 
-void configure_leds(void) {
-  ESP_LOGI(TAG, "Configuring led GPIO");
-  static const gpio_config_t led_pins = {
-    .pin_bit_mask = (
-        (1ULL << GPIO_NUM_13) |
-        (1ULL << GPIO_NUM_14) |
-        (1ULL << GPIO_NUM_15) |
-        (1ULL << GPIO_NUM_25) |
-        (1ULL << GPIO_NUM_26) |
-        (1ULL << GPIO_NUM_27)
-        ),
-    .mode = GPIO_MODE_OUTPUT,
-    .pull_up_en = GPIO_PULLUP_DISABLE,
-    .pull_down_en = GPIO_PULLDOWN_DISABLE,
-    .intr_type = GPIO_INTR_DISABLE
-  };
-  ESP_ERROR_CHECK(gpio_config(&led_pins));
-
-}
-
-void configure_rtc_wake(void) {
-  // Set up RTC wake for IO 32,33,34,35,36,39
-}
-
 void run_buttons(void* param) {
   Buttons* buttons = static_cast<Buttons*>(param);
   buttons->process_buttons();
@@ -126,6 +103,9 @@ void run_buttons(void* param) {
 
 extern "C" void app_main(void)
 {
+  esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+  init_ulp(cause);
+
   // Unused pin. Set to output.
   gpio_set_direction(GPIO_NUM_12, GPIO_MODE_OUTPUT);
 
@@ -136,8 +116,6 @@ extern "C" void app_main(void)
 
   AudioPlayer player(led.follow_ringbuf(), Led::kFollowRateHz);
   Buttons buttons(&player, &led);
-
-  configure_rtc_wake();
 
   xTaskCreate(&run_buttons, "button_task", 4096, &buttons, 32, NULL);
   while (1) {
