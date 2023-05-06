@@ -56,35 +56,16 @@ class Buttons {
 
  private:
   // Pin order follows SongColor int values.
-  static DRAM_ATTR const std::array<gpio_num_t, kNumColors> button_gpio_list_;
   static const uint64_t kLongPressUs = 30*1000*1000;
 
-  QueueHandle_t wake_queue_ = xQueueCreate(1, sizeof(char));
   AudioPlayer* player_;
   Led* led_;
 
-  // Used by the timer interrupt.
-  uint32_t intr_history_[kNumColors] = {};
-  uint64_t intr_num_samples_ = {};
-  ButtonState intr_old_button_state_ = {};
-
   // This just tells the system to wake up.
   QueueHandle_t sample_queue_ = xQueueCreate(10, sizeof(ButtonState));
-  static void IRAM_ATTR on_interrupt(void *args); 
-  void IRAM_ATTR disable_interrupts() const;
-  void enable_interrupts() const; 
 
   // Impelement the Hackaday debounce method in an interrupt.
-  void config_sample_timer();
-  void start_sample_timer();
-  void stop_sample_timer();
-  static bool IRAM_ATTR on_timer_interrupt(void* param);
-  bool IRAM_ATTR is_on(SongColor color);
-  void IRAM_ATTR push_history_bit(SongColor b, bool value);
-  void IRAM_ATTR sample_once();
   static void IRAM_ATTR on_ulp_interrupt(void* param);
-
-  void setup_gpio();
 
   // This reads the button state and sends commands until all buttons are
   // released.

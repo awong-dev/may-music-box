@@ -18,6 +18,9 @@ samples_filled:
 button_state:
         .long 0
 
+tmp_button_state:
+        .long 0
+
         .global debug_r0
 debug_r0:
         .long 0
@@ -30,6 +33,7 @@ debug_r1:
 debug_r2:
         .long 0
         .data
+
 // Definte a 16-bit button history. High-bytes are empty.
 // sw6 - rtc_gpio0
 // sw5 - rtc_gpio3
@@ -37,7 +41,6 @@ debug_r2:
 // sw3 - rtc_gpio5
 // sw2 - rtc_gpio9
 // sw1 - rtc_gpio8
-// Mask:  0x01B9
 #define BUTTON_HISTORY_PIN_OFFSET 0
 #define BUTTON_HISTORY_HISTORY_OFFSET 4
 #define BUTTON_HISTORY_ENTRY_WORDS 2
@@ -49,35 +52,29 @@ button_history0:
         .long 0x0000FFFF
         .global button_history1
 button_history1:
-        .long 3
+        .long 0
         .long 0x0000FFFF
         .global button_history2
 button_history2:
-        .long 4
+        .long 0
         .long 0x0000FFFF
         .global button_history3
 button_history3:
-        .long 5
+        .long 0
         .long 0x0000FFFF
         .global button_history4
 button_history4:
-        .long 9
+        .long 0
         .long 0x0000FFFF
         .global button_history5
 button_history5:
-        .long 8
+        .long 0
         .long 0x0000FFFF
 
 // Program code here.
         .text
         .global entry
 entry:
-//        MOVE R0, samples_filled
-//        LD R1, R0, 0
-//        ADD R1, R1, 1
-//        ST R1, R0, 0
-//        HALT
-
         JUMPS slow_poll, 1, LT
         JUMPS sample_buttons, 2, LT
         // On unknown stage, reset to 0 and halt.
@@ -111,10 +108,9 @@ start_sampling:
         MOVE R0, 0
 reset_history:
         MOVE R1, 0xFFFF
-        ADD R0, R0, button_history
-        ST R1, R0, BUTTON_HISTORY_HISTORY_OFFSET
+        ADD R2, R0, button_history
+        ST R1, R2, BUTTON_HISTORY_HISTORY_OFFSET
         ADD R0, R0, BUTTON_HISTORY_ENTRY_WORDS
-        sub R0, R0, button_history
         JUMPR reset_history, 12, LT
 
         // Reset button_state to 0
@@ -168,14 +164,14 @@ push_history:
         LD R1, R0, 0
         ADD R1, R1, 1
         ST R1, R0, 0
-        MOVE R0, button_history
 
+        MOVE R0, 0
 debounce:
         // set R1 = current history
         // set R3 = entry pointer
         // set R2 = calculated on-off state used by debounce_next
         // R0 is scratch plus conditional.
-        MOVE R3, R0
+        ADD R3, R0, button_history
         LD R1, R3, BUTTON_HISTORY_HISTORY_OFFSET
 
         // Test if button is down.
@@ -213,7 +209,7 @@ debounce_unknown:
 debounce_next:
         // Update the button state bitvector base on
         // ON/OFF state in R2.
-        MOVE R0, button_state
+        MOVE R0, tmp_button_state
         LD R1, R0, 0
         LSH R1, R1, 1
         OR R1, R1, R2
@@ -230,9 +226,11 @@ debounce_next:
         JUMPR send_wake, 16, LT
 
         // If all off in button_state vetor, move back to slow polling. Otherwise send wake.
-        MOVE R0, button_state
+        MOVE R0, tmp_button_state
         LD R0, R0, 0
-        AND R0, R0, 0x003F
+        AND R0, R0, 0x3F
+        MOVE R1, button_state
+        ST R0, R1, 0
         JUMPR start_slow_poll, 1, LT
 
 // Check RTC_CNTL_RDY_FOR_WAKEUP if we start trying to avoid spurious

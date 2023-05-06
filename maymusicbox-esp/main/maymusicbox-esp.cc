@@ -38,17 +38,6 @@ sdmmc_card_t* mount_sdcard() {
   };
   ESP_ERROR_CHECK(gpio_config(&sd_out_pins));
 
-  static const gpio_config_t sd_in_pins = {
-    .pin_bit_mask = (
-        (1ULL << GPIO_NUM_32)
-        ),
-    .mode = GPIO_MODE_INPUT,
-    .pull_up_en = GPIO_PULLUP_DISABLE,
-    .pull_down_en = GPIO_PULLDOWN_DISABLE,
-    .intr_type = GPIO_INTR_DISABLE
-  };
-  ESP_ERROR_CHECK(gpio_config(&sd_in_pins));
-
   static const char* kMountPoint = "/sdcard";
 
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
