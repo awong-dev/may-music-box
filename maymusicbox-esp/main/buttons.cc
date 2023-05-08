@@ -77,7 +77,6 @@ void Buttons::process_buttons() {
     if (xQueueReceive(sample_queue_, &bs, 500 / portTICK_PERIOD_MS) == pdFALSE) {
       // No change in state since we timedout. So just signal a status event.
 
-      ESP_LOGI(TAG, "NO CHANGE.");
       bs = prev_bs;
     }
     bs = to_bs(ulp_button_state);

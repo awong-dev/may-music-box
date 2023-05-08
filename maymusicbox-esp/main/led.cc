@@ -233,11 +233,13 @@ void Led::led_task() {
         int target_duty;
         if (degrade_count++ % kDegradeSlope == 0) {
           target_duty = std::max(0, cur_duty_ - 1);
+          degrade_count = 0;
         } else {
           target_duty = cur_duty_;
         }
         
 //        ESP_LOGI(TAG, "S");
+
         if (rb_bytes_available(follow_ringbuf_) >= sizeof(s)) {
           rb_read(follow_ringbuf_, reinterpret_cast<char*>(&s), sizeof(s), 1 / portTICK_PERIOD_MS);
           if (f_num_led_values < f_led_values.size()) {
@@ -255,6 +257,8 @@ void Led::led_task() {
           }
           s_last_follow_frame_no = s.n;
           float percent = s.volume;
+          assert(percent >= 0);
+
           // TODO: Fix math.
           percent = sqrt(percent);
           // Compress volume range to make LED brigher.
@@ -266,13 +270,14 @@ void Led::led_task() {
           if (new_duty > target_duty) {
             target_duty = new_duty;
           }
-//          ESP_LOGI(TAG, "t:%d n: %d v:%d p:%f", target_duty, new_duty, volume, percent);
         }
 
         static constexpr int kNumCyclesInSample = (kLedcFrequencyHz / kFollowRateHz);
         int scale = 1 + abs((target_duty - cur_duty_)) / (kNumCyclesInSample);
 
-//        ESP_LOGI(TAG, "s:%d, d:%d, r:%d", scale, target_duty - cur_duty_, (kLedcFrequencyHz / kFollowRateHz));
+        if (scale != 1) {
+          ESP_LOGI(TAG, "s:%d, d:%d, t:%d c:%d r:%d", scale, target_duty - cur_duty_, target_duty, cur_duty_, (kLedcFrequencyHz / kFollowRateHz));
+        }
         for (ledc_channel_t ch : channel_list_) {
           ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
                 kLedcSpeedMode,

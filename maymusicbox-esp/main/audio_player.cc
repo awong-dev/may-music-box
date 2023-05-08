@@ -1,5 +1,7 @@
 #include "audio_player.h"
 
+#include <array>
+
 #include "audio_def.h"
 #include "audio_element.h"
 #include "audio_pipeline.h"
@@ -30,7 +32,7 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
   mp3_decoder_ = mp3_decoder_init(&mp3_cfg);
 
   ESP_LOGI(TAG, "[4.3] Create led downmix filter");
-  led_downmix_cfg_t led_downmix_cfg = DEFAULT_LED_DOWNMIX_CONFIG();
+  led_downmix_cfg_t led_downmix_cfg;
   led_downmix_cfg.follow_ringbuf = follow_ringbuf;
   led_downmix_cfg.follow_rate = follow_rate;
   led_downmix_ = led_downmix_init(&led_downmix_cfg);
@@ -47,8 +49,8 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
   audio_pipeline_register(pipeline_, i2s_stream_writer_, "i2s");
 
   ESP_LOGI(TAG, "[4.6] Link it together [sdcard]-->fatfs_stream-->mp3_decoder-->led_downmix-->i2s_stream-->[codec_chip]");
-  static const char *link_tag[4] = {"file", "decoder", "filter", "i2s"};
-  audio_pipeline_link(pipeline_, &link_tag[0], 4);
+  static std::array link_tag = {"file", "decoder", "filter", "i2s"};
+  audio_pipeline_link(pipeline_, &link_tag[0], link_tag.size());
 
   ESP_LOGW(TAG, "[ 6.1 ] Enable audio chip");
   // Enable chip.
@@ -70,7 +72,7 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
   int vol = -20;
   i2s_alc_volume_set(i2s_stream_writer_, vol);
 
-  xTaskCreate(&AudioPlayer::pipeline_task_thunk, "pipeline_task", 4096, this, 1, NULL);
+  xTaskCreate(&AudioPlayer::pipeline_task_thunk, "pipeline_task", 4096, this, 2, NULL);
 }
 
 void AudioPlayer::start_playing(SongColor color) {
@@ -122,7 +124,7 @@ void AudioPlayer::pipeline_task() {
         audio_element_getinfo(mp3_decoder_, &music_info);
         ESP_LOGI(TAG, "[ * ] Received music info from mp3 decoder, sample_rates=%d, bits=%d, ch=%d",
             music_info.sample_rates, music_info.bits, music_info.channels);
-        audio_element_setinfo(led_downmix_, &music_info);
+        led_downmix_setinfo(led_downmix_, music_info.sample_rates, music_info.bits, music_info.channels);
         audio_element_setinfo(i2s_stream_writer_, &music_info);
         ESP_ERROR_CHECK(i2s_stream_set_clk(i2s_stream_writer_, music_info.sample_rates, music_info.bits, music_info.channels));
         continue;

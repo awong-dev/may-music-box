@@ -16,44 +16,24 @@ extern "C"
  * @brief      Equalizer Configuration
  */
 typedef struct led_downmix_cfg {
-    int samplerate;     /*!< Audio sample rate (in Hz)*/
-    int channel;        /*!< Number of audio channels (Mono=1, Dual=2) */
-    int out_rb_size;    /*!< Size of output ring buffer */
-    int task_stack;     /*!< Task stack size */
-    int task_core;      /*!< Task running in core...*/
-    int task_prio;      /*!< Task priority*/
-    bool stack_in_ext;  /*!< Try to allocate stack in external memory */
-    ringbuf_handle_t follow_ringbuf;
-    int follow_rate;  /* how frequently the follow_ringbuf is read */
+    int out_rb_size = 8 * 1024;    /*!< Size of output ring buffer */
+    ringbuf_handle_t follow_ringbuf = nullptr;
+    int follow_rate = 0;  /* how frequently the follow_ringbuf is read */
 } led_downmix_cfg_t;
 
-#define LED_DOWNMIX_TASK_STACK       (4 * 1024)
-#define LED_DOWNMIX_TASK_CORE        (0)
-#define LED_DOWNMIX_TASK_PRIO        (5)
-#define LED_DOWNMIX_RINGBUFFER_SIZE  (8 * 1024)
-
-#define DEFAULT_LED_DOWNMIX_CONFIG() {                   \
-        .samplerate     = 48000,                         \
-        .channel        = 1,                             \
-        .out_rb_size    = LED_DOWNMIX_RINGBUFFER_SIZE,   \
-        .task_stack     = LED_DOWNMIX_TASK_STACK,        \
-        .task_core      = LED_DOWNMIX_TASK_CORE,         \
-        .task_prio      = LED_DOWNMIX_TASK_PRIO,         \
-        .stack_in_ext   = true,                          \
-    }
-
 /**
- * @brief      Set the audio sample rate and the number of channels to be processed by the equalizer.
+ * @brief      Set the audio frame configuration info.
  *
  * @param      self       Audio element handle
  * @param      rate       Audio sample rate
- * @param      ch         Audio channel
+ * @param      bits       Bits per sample
+ * @param      channels   Number of channels
  *
  * @return
  *             ESP_OK
  *             ESP_FAIL
  */
-esp_err_t led_downmix_set_info(audio_element_handle_t self, int rate, int ch);
+esp_err_t led_downmix_setinfo(audio_element_handle_t self, int rate, int bits, int channels);
 
 /**
  * @brief      Create an Audio Element handle that equalizes incoming data.
