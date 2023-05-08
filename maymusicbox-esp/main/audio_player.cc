@@ -5,6 +5,7 @@
 #include "audio_def.h"
 #include "audio_element.h"
 #include "audio_pipeline.h"
+#include "driver/rtc_io.h"
 #include "esp_decoder.h"
 #include "mp3_decoder.h"
 #include "fatfs_stream.h"
@@ -13,6 +14,7 @@
 
 #include "logging.h"
 #include "led_downmix.h"
+#include "wake.h"
 
 AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
   ESP_LOGI(TAG, "[4.0] Create audio pipeline for playback");
@@ -49,15 +51,14 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
   audio_pipeline_register(pipeline_, i2s_stream_writer_, "i2s");
 
   ESP_LOGI(TAG, "[4.6] Link it together [sdcard]-->fatfs_stream-->mp3_decoder-->led_downmix-->i2s_stream-->[codec_chip]");
-  static std::array link_tag = {"file", "decoder", "filter", "i2s"};
+  static std::array link_tag = {"file", "decoder", "i2s"};
   audio_pipeline_link(pipeline_, &link_tag[0], link_tag.size());
 
   ESP_LOGW(TAG, "[ 6.1 ] Enable audio chip");
   // Enable chip.
   ESP_LOGI(TAG, "Turning on max98375a");
-  static const gpio_config_t amp_pins = {
+  static const gpio_config_t gain_pin = {
     .pin_bit_mask = (
-        (1ULL << GPIO_NUM_4) |
         (1ULL << GPIO_NUM_16)
         ),
     .mode = GPIO_MODE_OUTPUT,
@@ -65,17 +66,29 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
     .pull_down_en = GPIO_PULLDOWN_DISABLE,
     .intr_type = GPIO_INTR_DISABLE
   };
-  ESP_ERROR_CHECK(gpio_config(&amp_pins));
-  gpio_set_level(GPIO_NUM_4, 1);
+  ESP_ERROR_CHECK(gpio_config(&gain_pin));
+
+  // Set to 9db.
+  gpio_set_level(GPIO_NUM_16, 1);
+
+  // Put chip in L+R/2 mode.
+  ESP_ERROR_CHECK(rtc_gpio_init(GPIO_NUM_4));
+  ESP_ERROR_CHECK(rtc_gpio_isolate(GPIO_NUM_4));
+
+  ESP_ERROR_CHECK(rtc_gpio_hold_dis(GPIO_NUM_4));
+  ESP_ERROR_CHECK(rtc_gpio_set_direction(GPIO_NUM_4, RTC_GPIO_MODE_OUTPUT_ONLY));
+  ESP_ERROR_CHECK(rtc_gpio_set_direction_in_sleep(GPIO_NUM_4, RTC_GPIO_MODE_OUTPUT_ONLY));
+  ESP_ERROR_CHECK(rtc_gpio_set_level(GPIO_NUM_4, 1));
 
   // Initial volume set!
-  int vol = -20;
+  int vol = -10;
   i2s_alc_volume_set(i2s_stream_writer_, vol);
 
-  xTaskCreate(&AudioPlayer::pipeline_task_thunk, "pipeline_task", 4096, this, 2, NULL);
+  xTaskCreate(&AudioPlayer::pipeline_task_thunk, "pipeline_task", 4096, this, 1, NULL);
 }
 
 void AudioPlayer::start_playing(SongColor color) {
+  wake_playing_incr();
   ESP_LOGW(TAG, "[ * ] Playing test.mp3");
   const char *url = "/sdcard/test.mp3";
   audio_pipeline_stop(pipeline_);
@@ -135,6 +148,7 @@ void AudioPlayer::pipeline_task() {
         audio_element_state_t el_state = audio_element_get_state(i2s_stream_writer_);
         if (el_state == AEL_STATE_FINISHED) {
           ESP_LOGI(TAG, "[ * ] Finished.");
+          wake_playing_decr();
         }
         continue;
       }

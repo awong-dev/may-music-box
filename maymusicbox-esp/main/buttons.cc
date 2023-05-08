@@ -34,6 +34,7 @@ ButtonState IRAM_ATTR to_bs(uint32_t bs_bits) {
 }
 
 void IRAM_ATTR Buttons::on_ulp_interrupt(void* param) {
+//  wake_button_incr();
   // Make sure to grab a snapshot to avoid race conditions.
   ButtonState bs = to_bs(ulp_button_state);
   xQueueSendFromISR(static_cast<Buttons*>(param)->sample_queue_, &bs, NULL);
@@ -73,7 +74,7 @@ void Buttons::process_buttons() {
   ButtonState bs = {};
   uint64_t button_down_times[kNumColors] = {};
   while (1) {
-    // Just woke... time to read button state and turn into a command.
+    // Read button state and turn into a command. May have just woke.
     if (xQueueReceive(sample_queue_, &bs, 500 / portTICK_PERIOD_MS) == pdFALSE) {
       // No change in state since we timedout. So just signal a status event.
 
@@ -157,6 +158,7 @@ void Buttons::process_buttons() {
     }
 
     prev_bs = bs;
+    wake_button_dec();
   }
 }
 

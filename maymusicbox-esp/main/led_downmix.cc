@@ -53,6 +53,16 @@ static esp_err_t led_downmix_open(audio_element_handle_t self) {
     return ESP_ERR_NO_MEM;
   }
 
+  led_downmix->samplerate = 0;
+  led_downmix->bits = 0;
+  led_downmix->channels = 0;
+  led_downmix->at_eof = 0;
+//  led_downmix->follow_window_frames = 0;
+//  led_downmix->follow_window_frames_remainder = 0;
+  led_downmix->follow_windows_accumulated = 0;
+  led_downmix->follow_frames_accumulated = 0;
+  led_downmix->follow_accumulate = 0;
+
   return ESP_OK;
 }
 
@@ -129,7 +139,6 @@ static audio_element_err_t led_downmix_process(audio_element_handle_t self, char
         static int s_follow_frame_no = 0;
         s.n = s_follow_frame_no++;
         if (led_downmix->at_eof) {
-          ESP_LOGI(TAG, "Finishing");
           s.n = -s.n;
         }
         s.volume = led_downmix->follow_accumulate;
