@@ -57,6 +57,7 @@ static esp_err_t led_downmix_open(audio_element_handle_t self) {
   led_downmix->bits = 0;
   led_downmix->channels = 0;
   led_downmix->at_eof = 0;
+  // TODO: Can we reset this?
 //  led_downmix->follow_window_frames = 0;
 //  led_downmix->follow_window_frames_remainder = 0;
   led_downmix->follow_windows_accumulated = 0;
@@ -118,7 +119,7 @@ static audio_element_err_t led_downmix_process(audio_element_handle_t self, char
 
     audio_element_err_t written_size = audio_element_output(self, (char *)led_downmix->buf, r_size);
     if (written_size < r_size) {
-      ESP_LOGE(TAG, "Dropped %d bytes", r_size - written_size);
+      ESP_LOGW(TAG, "Dropped %d bytes", r_size - written_size);
     }
     int num_frame_written = written_size / frame_bytes;
     for (int i = 0; i < num_frame_written; ++i) {
@@ -136,17 +137,11 @@ static audio_element_err_t led_downmix_process(audio_element_handle_t self, char
       // If a window is complete, write it out and reset.
       if (led_downmix->at_eof || led_downmix->follow_frames_accumulated == frames_to_accumulate) {
         Led::FollowSample s;
-        static int s_follow_frame_no = 0;
-        s.n = s_follow_frame_no++;
-        if (led_downmix->at_eof) {
-          s.n = -s.n;
-        }
-        s.volume = led_downmix->follow_accumulate;
+        s.volume = led_downmix->follow_accumulate/2; // Ensure it cannot overflow signed 16.
         if (rb_write(led_downmix->follow_ringbuf,
             reinterpret_cast<char*>(&s),
             sizeof(s),
             0) < sizeof(s)) {
-          ESP_LOGI(TAG, "! n:%d", s.n);
         }
         led_downmix->follow_windows_accumulated++;
         led_downmix->follow_accumulate = 0;
@@ -197,6 +192,9 @@ audio_element_handle_t led_downmix_init(led_downmix_cfg_t *config)
     cfg.buffer_len = 0;
     cfg.tag = "led_downmix";
     cfg.out_rb_size = config->out_rb_size;
+    cfg.task_core = 0;
+    cfg.task_prio = 5;
+    cfg.task_stack = 8 * 1024;
 
     audio_element_handle_t el = audio_element_init(&cfg);
     AUDIO_MEM_CHECK(TAG, el, {audio_free(led_downmix); return NULL;});

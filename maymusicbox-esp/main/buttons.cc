@@ -15,11 +15,35 @@
 #include "ulp_button_wake.h"
 #include "wake.h"
 
-static const char *TAG = "buttons";
+namespace {
+const char *TAG = "buttons";
 
-static DRAM_ATTR constexpr int kTimerDivider = 16;
-static DRAM_ATTR constexpr int kTimerScale = TIMER_BASE_CLK / kTimerDivider;
-static DRAM_ATTR constexpr float kTimerInterval = (0.005/32); // 5ms total debounce
+DRAM_ATTR constexpr int kTimerDivider = 16;
+DRAM_ATTR constexpr int kTimerScale = TIMER_BASE_CLK / kTimerDivider;
+DRAM_ATTR constexpr float kTimerInterval = (0.005/32); // 5ms total debounce
+
+ButtonEvent button_state_to_event(bool prev, bool cur) {
+  if (prev && cur) {
+    return ButtonEvent::On;
+  } else if (prev && !cur) {
+    return ButtonEvent::Up;
+  } else if (!prev && cur) {
+    return ButtonEvent::Down;
+  } else {
+    return ButtonEvent::Off;
+  }
+}
+
+void state_to_events(std::array<ButtonEvent,6>& events,
+    const ButtonState& prev,
+    const ButtonState& cur) {
+  events[0] = button_state_to_event(prev.b0, cur.b0);
+  events[1] = button_state_to_event(prev.b1, cur.b1);
+  events[2] = button_state_to_event(prev.b2, cur.b2);
+  events[3] = button_state_to_event(prev.b3, cur.b3);
+  events[4] = button_state_to_event(prev.b4, cur.b4);
+  events[5] = button_state_to_event(prev.b5, cur.b5);
+}
 
 ButtonState IRAM_ATTR to_bs(uint32_t bs_bits) {
   ButtonState bs;
@@ -33,38 +57,24 @@ ButtonState IRAM_ATTR to_bs(uint32_t bs_bits) {
   return bs;
 }
 
-void IRAM_ATTR Buttons::on_ulp_interrupt(void* param) {
-//  wake_button_incr();
-  // Make sure to grab a snapshot to avoid race conditions.
-  ButtonState bs = to_bs(ulp_button_state);
-  xQueueSendFromISR(static_cast<Buttons*>(param)->sample_queue_, &bs, NULL);
-}
-
-Buttons::Buttons(AudioPlayer *player, Led* led) : player_(player), led_(led) {
-  ESP_ERROR_CHECK(register_button_wake_isr(&Buttons::on_ulp_interrupt, this));
-}
+}  // namespace
 
 const uint64_t Buttons::kLongPressUs;
 
-static ButtonEvent button_state_to_event(bool prev, bool cur) {
-  if (prev && cur) {
-    return ButtonEvent::On;
-  } else if (prev && !cur) {
-    return ButtonEvent::Up;
-  } else if (!prev && cur) {
-    return ButtonEvent::Down;
-  } else {
-    return ButtonEvent::Off;
-  }
+Buttons::Buttons(Led* led) : led_(led) {
+  // Fake the first interrupt because that was consumed by waking the entire program.
+  on_ulp_interrupt(this);
+
+  // Register the handler for actual WAKE interrupts from the ULP.
+  ESP_ERROR_CHECK(register_button_wake_isr(&Buttons::on_ulp_interrupt, this));
 }
 
-static void state_to_events(std::array<ButtonEvent,6>& events, const ButtonState& prev, const ButtonState& cur) {
-  events[0] = button_state_to_event(prev.b0, cur.b0);
-  events[1] = button_state_to_event(prev.b1, cur.b1);
-  events[2] = button_state_to_event(prev.b2, cur.b2);
-  events[3] = button_state_to_event(prev.b3, cur.b3);
-  events[4] = button_state_to_event(prev.b4, cur.b4);
-  events[5] = button_state_to_event(prev.b5, cur.b5);
+
+void IRAM_ATTR Buttons::on_ulp_interrupt(void* param) {
+  wake_incr();
+  // Make sure to grab a snapshot to avoid race conditions.
+  ButtonState bs = to_bs(ulp_button_state);
+  xQueueSendFromISR(static_cast<Buttons*>(param)->button_state_queue_, &bs, NULL);
 }
 
 // This reads the button state and sends commands until all buttons are
@@ -75,7 +85,8 @@ void Buttons::process_buttons() {
   uint64_t button_down_times[kNumColors] = {};
   while (1) {
     // Read button state and turn into a command. May have just woke.
-    if (xQueueReceive(sample_queue_, &bs, 500 / portTICK_PERIOD_MS) == pdFALSE) {
+    if (xQueueReceive(button_state_queue_, &bs, 500 / portTICK_PERIOD_MS) == pdFALSE) {
+      wake_incr();
       // No change in state since we timedout. So just signal a status event.
 
       bs = prev_bs;
@@ -110,13 +121,16 @@ void Buttons::process_buttons() {
         case ButtonEvent::Up:
           ESP_LOGI(TAG, "Button %d up.", i);
           button_down_times[i] = 0;
-          led_->dim_to_on(color);
+          led_->dim_to_glow(color);
           break;
 
         case ButtonEvent::Down:
           ESP_LOGI(TAG, "Button %d down.", i);
-          led_->start_following();
           led_->flare(color);
+          if (!player_) {
+            player_ = std::make_unique<AudioPlayer>(led_->follow_ringbuf(), Led::kFollowRateHz);
+          }
+
           player_->start_playing(color);
           button_down_times[i] = esp_timer_get_time();
           break;
@@ -158,7 +172,7 @@ void Buttons::process_buttons() {
     }
 
     prev_bs = bs;
-    wake_button_dec();
+    wake_dec();
   }
 }
 

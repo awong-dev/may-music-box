@@ -93,21 +93,28 @@ void run_buttons(void* param) {
 extern "C" void app_main(void)
 {
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-  init_ulp(cause);
-
   // Unused pin. Set to output.
+  // TODO: consider isolating.
   gpio_set_direction(GPIO_NUM_12, GPIO_MODE_OUTPUT);
 
-  mount_sdcard();
-
   Led led;
-  led.flare_all_and_follow();
 
-  AudioPlayer player(led.follow_ringbuf(), Led::kFollowRateHz);
-  Buttons buttons(&player, &led);
+  init_ulp();
+  if (cause != ESP_SLEEP_WAKEUP_ULP) {
+    start_ulp();
+    led.flare_all_and_follow();
 
-  xTaskCreate(&run_buttons, "button_task", 4096, &buttons, 32, NULL);
+    // Sleep right away after first start of ULP. Button history
+    // somehow doesn't record right without it.
+    ESP_LOGI(TAG, "Initial sleep");
+    esp_deep_sleep_start();
+  }
+
+  mount_sdcard();
+  Buttons buttons(&led);
+
+  xTaskCreate(&run_buttons, "button_task", 4096, &buttons, 5, NULL);
   while (1) {
-    vTaskDelay(portTICK_PERIOD_MS);
+    vTaskDelay(portMAX_DELAY);
   }
 }

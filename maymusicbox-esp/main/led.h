@@ -14,17 +14,14 @@ class Led {
  public:
   Led();
   void flare(SongColor color);
-  void dim_to_on(SongColor color);
+  void dim_to_glow(SongColor color);
   void flare_all_and_follow();
 
-  void set_to_follow(SongColor color);
-  void start_following();
   void print_led_times();
 
   // Follow ringbuf info.
   static inline constexpr int kFollowRateHz = 1000; // Window at 1000hz sample.
   struct FollowSample {
-    int n;
     int16_t volume;
   };
   ringbuf_handle_t follow_ringbuf() const { return follow_ringbuf_; }
@@ -34,9 +31,10 @@ class Led {
     Nothing = 0,
     FlareToMax,
     FlareToMaxThenDim,
-    DimToOn,
+    DimToGlow,
     SampleRingbuf,
   };
+
   struct LedCommand {
     Action action = Action::Nothing;
     ledc_channel_t channel = {};
@@ -79,8 +77,6 @@ class Led {
 
   // Handle up to 96khz power values. Add padding of 3 values just because.
   ringbuf_handle_t follow_ringbuf_ = rb_create(sizeof(FollowSample), (96000 / kFollowRateHz) + 3);
-//  ringbuf_handle_t follow_ringbuf_ = rb_create(sizeof(FollowSample), 100);
-  bool is_following_ = false;
   int cur_duty_ = 0;
   esp_timer_handle_t follow_timer_ = nullptr;
 
@@ -88,8 +84,8 @@ class Led {
     static_cast<Led*>(param)->led_task();
   }
 
-  static bool IRAM_ATTR on_led_intr_(const ledc_cb_param_t *param, void *user_arg);
-  static void IRAM_ATTR on_follow_intr_(void *param);
+  static bool IRAM_ATTR on_led_intr(const ledc_cb_param_t *param, void *user_arg);
+  static void IRAM_ATTR on_follow_intr(void *param);
 
   void flare_channel(ledc_channel_t channel);
 

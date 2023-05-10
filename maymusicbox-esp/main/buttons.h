@@ -8,8 +8,7 @@
 
 #include "song.h"
 
-#include <array>
-#include <atomic>
+#include <memory>
 
 class AudioPlayer;
 class Led;
@@ -52,17 +51,16 @@ struct ButtonState {
 class Buttons {
  public:
 
-  Buttons(AudioPlayer *player, Led* led);
+  explicit Buttons(Led* led);
 
  private:
   // Pin order follows SongColor int values.
   static const uint64_t kLongPressUs = 30*1000*1000;
 
-  AudioPlayer* player_;
+  std::unique_ptr<AudioPlayer> player_;
   Led* led_;
 
-  // This just tells the system to wake up.
-  QueueHandle_t sample_queue_ = xQueueCreate(10, sizeof(ButtonState));
+  QueueHandle_t button_state_queue_ = xQueueCreate(10, sizeof(ButtonState));
 
   // Impelement the Hackaday debounce method in an interrupt.
   static void IRAM_ATTR on_ulp_interrupt(void* param);
