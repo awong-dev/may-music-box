@@ -88,7 +88,7 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
 }
 
 void AudioPlayer::start_playing(SongColor color) {
-  wake_incr();
+  wake_set_playing(true);
   const char *url = "/sdcard/test.mp3";
         
   esp_err_t ret = ESP_OK;
@@ -180,7 +180,7 @@ void AudioPlayer::pipeline_task() {
         audio_element_state_t el_state = audio_element_get_state(i2s_stream_writer_);
         if (el_state == AEL_STATE_FINISHED) {
           ESP_LOGI(TAG, "[ * ] Finished.");
-          wake_dec();
+          wake_set_playing(false);
         }
         continue;
       }
