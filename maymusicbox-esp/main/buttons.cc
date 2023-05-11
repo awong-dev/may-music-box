@@ -64,6 +64,8 @@ const uint64_t Buttons::kLongPressUs;
 Buttons::Buttons(Led* led) : led_(led) {
   // Fake the first interrupt because that was consumed by waking the entire program.
   on_ulp_interrupt(this);
+  ESP_LOGI(TAG, "ulp lbs:%08x tbs:%08x debugr0:%08x",
+  ulp_last_button_state, ulp_tmp_button_state, ulp_debug_r0);
 
   // Register the handler for actual WAKE interrupts from the ULP.
   ESP_ERROR_CHECK(register_button_wake_isr(&Buttons::on_ulp_interrupt, this));
@@ -96,7 +98,8 @@ void Buttons::process_buttons() {
 
     if (bs != prev_bs) {
       ESP_LOGI(TAG, " bs:%02x pbs:%02x 0:%02x 1:%02x 2:%02x 3:%02x 4:%02x 5:%02x\n"
-          "    hs0:%08x hs1:%08x hs2:%08x hs3:%08x hs4:%08x hs5:%08x",
+          "    hs0:%08x hs1:%08x hs2:%08x hs3:%08x hs4:%08x hs5:%08x\n"
+          "    all_off:%08x",
           *reinterpret_cast<char*>(&bs),
           *reinterpret_cast<char*>(&prev_bs),
           static_cast<uint32_t>(events[0]),
@@ -110,11 +113,12 @@ void Buttons::process_buttons() {
           (&ulp_button_history2)[1],
           (&ulp_button_history3)[1],
           (&ulp_button_history4)[1],
-          (&ulp_button_history5)[1]
+          (&ulp_button_history5)[1],
+          ulp_all_off
           );
     }
 
-    if (ulp_all_off != 0) {
+    if ((ulp_all_off & 0xFFFF) != 1) {
       for (int i = 0; i < kNumColors; i++) {
         SongColor color = static_cast<SongColor>(i);
         switch (events[i]) {
@@ -140,7 +144,8 @@ void Buttons::process_buttons() {
               // TODO: Flag a long press.
               ESP_LOGI(TAG, "Button %d long press.", i);
               ESP_LOGI(TAG, " bs:%02x pbs:%02x 0:%02x 1:%02x 2:%02x 3:%02x 4:%02x 5:%02x\n"
-                  "    hs0:%08x hs1:%08x hs2:%08x hs3:%08x hs4:%08x hs5:%08x",
+                  "    hs0:%08x hs1:%08x hs2:%08x hs3:%08x hs4:%08x hs5:%08x\n"
+                  "    all_off:%08x",
                   *reinterpret_cast<char*>(&bs),
                   *reinterpret_cast<char*>(&prev_bs),
                   static_cast<uint32_t>(events[0]),
@@ -154,7 +159,8 @@ void Buttons::process_buttons() {
                   (&ulp_button_history2)[1],
                   (&ulp_button_history3)[1],
                   (&ulp_button_history4)[1],
-                  (&ulp_button_history5)[1]
+                  (&ulp_button_history5)[1],
+                  ulp_all_off
                   );
             }
             break;

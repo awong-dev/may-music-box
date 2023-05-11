@@ -22,6 +22,7 @@ all_off:
 last_button_state:
         .long 0
 
+        .global tmp_button_state
 tmp_button_state:
         .long 0
 
@@ -96,6 +97,7 @@ slow_poll:
         // Sample all the GPIOs now and start_sampling if any
         // of them are on.
         READ_RTC_REG(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT_S, 16)
+        MOVE R3, R0  // Save slow-poll GPIO snapshot to R3
         AND R1, R0, BUTTON_RTC_GPIO_MASK
         SUB R0, R1, BUTTON_RTC_GPIO_MASK  // Ensure none are set.
 
@@ -113,6 +115,17 @@ start_sampling:
         MOVE R1, samples_filled
         ST R0, R1, 0
 
+        MOVE R0, tmp_button_state
+        MOVE R1, 0
+        ST R1, R0, 0
+
+        MOVE R0, last_button_state
+        MOVE R1, 0
+        ST R1, R0, 0
+
+        MOVE R0, debug_r0
+        ST R3, R0, 0
+
         // Reset history. This shouldn't be necessary, but let's be sure.
         MOVE R0, 0
 reset_history:
@@ -122,18 +135,11 @@ reset_history:
         ADD R0, R0, BUTTON_HISTORY_ENTRY_WORDS
         JUMPR reset_history, 12, LT
 
-        // Reset last_button_state to 0
-        MOVE R0, last_button_state
-        MOVE R1, 0
-        ST R1, R0, 0
-
-        MOVE R0, tmp_button_state
-        MOVE R1, 0
-        ST R1, R0, 0
-
-        // Move to stage 2 then fall through.
+        // Move to stage 2. Load GPIO back to R0 tne start sampling
         SLEEP 1
         STAGE_INC 1
+        MOVE R0, R3  // Restore the GPIO snapshot saved from slow_poll.
+        JUMP sample_buttons_no_read_gpio
 
 // Sample Buttons mode produces a continuous 16-bit history of all the
 // buttons, polling with a period of 5ms/16 for a 5ms debounce. If any
@@ -143,6 +149,9 @@ reset_history:
 sample_buttons:
         // Update history for all gpios.
         READ_RTC_REG(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT_S, 16)
+
+        // Use this label if GPIO data already in R0 from slow-poll.
+sample_buttons_no_read_gpio:
 
         // Set R1 = current gpio sample.
         // Set R0 = entry offset from button_history

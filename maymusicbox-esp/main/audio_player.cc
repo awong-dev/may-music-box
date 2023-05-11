@@ -94,15 +94,16 @@ void AudioPlayer::start_playing(SongColor color) {
   esp_err_t ret = ESP_OK;
   ESP_GOTO_ON_ERROR(
       audio_pipeline_stop(pipeline_),
-      skip_playback,
+      skip_stopping,
       TAG,
       "Failed starting pipeline stop");
   ESP_GOTO_ON_ERROR(
       audio_pipeline_wait_for_stop_with_ticks(pipeline_, 1000 / portTICK_PERIOD_MS),
-      skip_playback,
+      skip_stopping,
       TAG,
       "Unable to stop pipeline");
 
+skip_stopping:
   ESP_GOTO_ON_ERROR(
       audio_element_set_uri(fatfs_stream_reader_, url),
       skip_playback,
