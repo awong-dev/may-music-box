@@ -106,7 +106,7 @@ void Led::dim_to_glow(SongColor color) {
 
 void Led::flare_all_and_follow() {
   for (auto&& info : led_info_) {
-    LedCommand c(Action::FlareToMaxThenOff, info.channel, 0);
+    LedCommand c(Action::FlareToMaxThenOffAndFollow, info.channel, 0);
     xQueueSend(command_queue_, &c, portMAX_DELAY);
   }
 }
@@ -128,134 +128,175 @@ void Led::config_follow_timer() {
 void IRAM_ATTR Led::on_follow_intr(void *param) {
   Led* led = static_cast<Led*>(param);
   // Channel is ignored for SampleRingbuf. All channels are populated.
-  LedCommand c(Action::SampleRingbuf, led_info_.front().channel, 0);
+  LedCommand c(Action::SampleRingbuf, LEDC_CHANNEL_MAX, 0);
   xQueueSendFromISR(led->command_queue_, &c, 0);
 }
 
 bool Led::on_led_intr(const ledc_cb_param_t *param, void *user_arg) {
   Led* led = static_cast<Led*>(user_arg);
   if (param->event == LEDC_FADE_END_EVT) {
-    Action last_action =
-      led->current_action_[param->channel].exchange(Action::Nothing);
-    if (last_action == Action::FlareToMaxThenOff) {
-      LedCommand c(Action::DimToOff, static_cast<ledc_channel_t>(param->channel), param->duty);
-      xQueueSendFromISR(led->command_queue_, &c, 0);
-      return true;
-    }
+    LedCommand c(Action::FadeEnd, static_cast<ledc_channel_t>(param->channel), param->duty);
+    xQueueSendFromISR(led->command_queue_, &c, 0);
+    return true;
   }
   return false;
-}
-
-void Led::flare_channel(ledc_channel_t channel) {
-  LedCommand c(Action::FlareToMax, channel, 0);
-  xQueueSend(command_queue_, &c, portMAX_DELAY);
 }
 
 void Led::led_task() {
   while(1) {
     LedCommand command;
     xQueueReceive(command_queue_, &command, portMAX_DELAY);
-    if (command.action != Action::SampleRingbuf &&
-        current_action_[command.channel] != Action::Nothing) {
-      ESP_LOGI(TAG, "Channel %d busy. Skipping command %d",
-          command.channel, static_cast<int>(command.action));
-      continue;
+    handle_command(command);
+  }
+}
+
+void Led::handle_command(const LedCommand& command) {
+  auto& state = channel_state_[command.channel];
+
+  // Handle the FadeEnd event first because it changes the
+  // busy state for the channel.
+  if (command.action == Action::FadeEnd) {
+    state.current_duty = command.current_duty;
+    if (state.next_action != Action::Nothing) {
+       send_command(state.next_action, command.channel, command.current_duty);
+    } else {
+       state.is_busy = false;
+    }
+    return;
+  }
+
+  // Reenqueue command if target channel is busy.
+  if (command.channel == LEDC_CHANNEL_MAX) {
+    handle_broadcast_command(command);
+    return;
+  }
+
+  if (state.is_busy) {
+    send_command(command.action, command.channel, command.current_duty);
+    return;
+  }
+
+  state.next_action = Action::Nothing;
+  state.is_busy = true;
+  state.follow_ringbuf = false;
+  switch (command.action) {
+    case Action::FollowRingbuf:
+      state.is_busy = false;
+      state.follow_ringbuf = true;
+      break;
+
+    case Action::FlareToMaxThenOffAndFollow:
+      state.next_action = Action::DimToOffAndFollow;
+      // Fall through.
+
+    case Action::FlareToMax:
+      ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
+          kLedcSpeedMode,
+          command.channel,
+          kMaxDuty * kFlarePercentage,  // target
+          kFlareScale,
+          10,
+          LEDC_FADE_NO_WAIT));
+      break;
+
+    case Action::DimToGlow:
+      ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
+          kLedcSpeedMode,
+          command.channel,
+          kMaxDuty * kGlowPercentage,
+          1,
+          100,
+          LEDC_FADE_NO_WAIT));
+      break;
+
+    case Action::DimToOffAndFollow:
+      state.next_action = Action::FollowRingbuf;
+      ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
+          kLedcSpeedMode,
+          command.channel,
+          0,
+          1,
+          100,
+          LEDC_FADE_NO_WAIT));
+      break;
+
+    default:
+      break;
+  }
+}
+
+void Led::handle_broadcast_command(const LedCommand& command) {
+  if (command.action == Action::SampleRingbuf) {
+    FollowSample s;
+
+    int new_duty = -1;
+    if (rb_bytes_available(follow_ringbuf_) >= sizeof(s)) {
+      rb_read(follow_ringbuf_, reinterpret_cast<char*>(&s), sizeof(s), 1 / portTICK_PERIOD_MS);
+      if (f_num_led_values < f_led_values.size()) {
+        f_led_values[f_num_led_values].ts = static_cast<int32_t>(esp_timer_get_time() / 1000);
+        f_led_values[f_num_led_values].s = s;
+        f_num_led_values++;
+      }
+      float percent = s.volume;
+      assert(percent >= 0);
+
+      // TODO: Fix math.
+      percent = sqrt(percent);
+      // Compress volume range to make LED brigher.
+      percent /= std::numeric_limits<int16_t>::max()/8;
+      percent = std::min(percent, 1.0f);
+
+      new_duty = kMaxDuty * percent;
     }
 
-    current_action_[command.channel] = command.action;
+    // Calculate degraded duty.
+    static constexpr int kNumCyclesInSample = (kLedcFrequencyHz / kFollowRateHz);
 
-    switch (command.action) {
-      case Action::FlareToMax:
-      case Action::FlareToMaxThenOff:
-        ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
-            kLedcSpeedMode,
-            command.channel,
-            kMaxDuty * kFlarePercentage,  // target
-            kFlareScale,
-            1,
-            LEDC_FADE_NO_WAIT));
-      break;
+    static constexpr int kDegradeSlope = 10;
+    static int degrade_count = 0;
+    degrade_count++;
 
-      case Action::DimToGlow:
-        ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
-            kLedcSpeedMode,
-            command.channel,
-            kMaxDuty * kGlowPercentage,
-            1,
-            15,
-            LEDC_FADE_NO_WAIT));
-      break;
-
-      case Action::DimToOff:
-        ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
-            kLedcSpeedMode,
-            command.channel,
-            0,
-            1,
-            30,
-            LEDC_FADE_NO_WAIT));
-      break;
-
-      case Action::SampleRingbuf: {
-        FollowSample s;
-
-        // Degrade it.
-        static int degrade_count = 0;
-        static constexpr int kDegradeSlope = 10;
-        int target_duty;
-        if (degrade_count++ % kDegradeSlope == 0) {
-          target_duty = std::max(0, cur_duty_ - 1);
-          degrade_count = 0;
-        } else {
-          target_duty = cur_duty_;
-        }
-        
-        if (rb_bytes_available(follow_ringbuf_) >= sizeof(s)) {
-          rb_read(follow_ringbuf_, reinterpret_cast<char*>(&s), sizeof(s), 1 / portTICK_PERIOD_MS);
-          if (f_num_led_values < f_led_values.size()) {
-            f_led_values[f_num_led_values].ts = static_cast<int32_t>(esp_timer_get_time() / 1000);
-            f_led_values[f_num_led_values].s = s;
-            f_num_led_values++;
-          }
-          float percent = s.volume;
-          assert(percent >= 0);
-
-          // TODO: Fix math.
-          percent = sqrt(percent);
-          // Compress volume range to make LED brigher.
-          percent /= std::numeric_limits<int16_t>::max()/8;
-          percent = std::min(percent, 1.0f);
-
-          int new_duty = kMaxDuty * percent;
-          // It's a new peak so update.
-          if (new_duty > target_duty) {
-            target_duty = new_duty;
-          }
-        }
-
-        static constexpr int kNumCyclesInSample = (kLedcFrequencyHz / kFollowRateHz);
-        int scale = 1 + abs((target_duty - cur_duty_)) / (kNumCyclesInSample);
-
-        if (scale != 1) {
-          ESP_LOGI(TAG, "s:%d, d:%d, t:%d c:%d r:%d", scale, target_duty - cur_duty_, target_duty, cur_duty_, (kLedcFrequencyHz / kFollowRateHz));
-        }
-        for (auto&& info : led_info_) {
-          ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
-                kLedcSpeedMode,
-                info.channel,
-                target_duty,
-                scale,
-                1,
-                LEDC_FADE_NO_WAIT));
-        }
-        cur_duty_ = target_duty;
+    for (int i = 0; i < led_info_.size(); ++i) {
+      // TODO: how to come back to the ringbuf level quickly?
+      if (channel_state_[i].is_busy || !channel_state_[i].follow_ringbuf) {
+        continue;
       }
-      break;
 
-      case Action::Nothing:
-      break;
+      // Calculated degraded duty.
+      int target_duty = channel_state_[i].current_duty;
+      if (degrade_count % kDegradeSlope == 0) {
+        target_duty = std::max(0, target_duty - 1);
+        degrade_count = 0;
+      }
+
+      // New peak.
+      if (new_duty > target_duty) {
+        target_duty = new_duty;
+      }
+
+      // Interpolate the scale.
+      int scale = 1;
+      uint32_t current_duty = channel_state_[i].current_duty;
+      if (target_duty > current_duty) {
+        scale += (target_duty - current_duty) / kNumCyclesInSample;
+      } else {
+        scale += (current_duty - target_duty) / kNumCyclesInSample;
+      }
+
+      ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
+            kLedcSpeedMode,
+            led_info_[i].channel,
+            target_duty,
+            scale,
+            1,
+            LEDC_FADE_NO_WAIT));
     }
   }
+}
+
+void Led::send_command(Action action, ledc_channel_t channel, uint32_t current_duty) {
+  LedCommand c(action, channel, current_duty);
+  xQueueSend(command_queue_, &c, portMAX_DELAY);
 }
 
 void Led::print_led_times() {
