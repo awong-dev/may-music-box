@@ -43,14 +43,13 @@ int f_num_led_values = 0;
 
 }  // namespace
 
-const std::array<gpio_num_t, kNumColors> Led::led_gpio_list_;
-const std::array<ledc_channel_t, kNumColors> Led::channel_list_;
+const std::array<Led::LedInfo, kNumColors> Led::led_info_;
 
 Led::Led() {
   ESP_LOGI(TAG, "Configuring led GPIO");
   uint64_t pin_bit_mask = 0;
-  for (gpio_num_t pin : led_gpio_list_) {
-    pin_bit_mask = pin_bit_mask | (1ULL << pin);
+  for (auto& info : led_info_) {
+    pin_bit_mask = pin_bit_mask | (1ULL << info.pin);
   }
   static const gpio_config_t led_pins = {
     .pin_bit_mask = pin_bit_mask,
@@ -74,8 +73,9 @@ Led::Led() {
   // Setup all Led channels.
   for (int i = 0; i < kNumColors; i++) {
     ledc_channel_config_t channel_config = default_channel_config();
-    channel_config.channel = channel_list_[i];
-    channel_config.gpio_num = led_gpio_list_[i];
+    auto& info = led_info_[i];
+    channel_config.channel = info.channel;
+    channel_config.gpio_num = info.pin;
     ESP_ERROR_CHECK(ledc_channel_config(&channel_config));
   }
 
@@ -87,28 +87,27 @@ Led::Led() {
 
   ledc_cbs_t cbs;
   cbs.fade_cb = &Led::on_led_intr;
-  for (ledc_channel_t ch : channel_list_) {
-    ledc_cb_register(kLedcSpeedMode, ch, &cbs, this);
+  for (auto& info : led_info_) {
+    ledc_cb_register(kLedcSpeedMode, info.channel, &cbs, this);
   }
   // i2s_stream defaults to priority 23.
   xTaskCreate(&Led::led_task_thunk, "led_task", 4096, this, 20, NULL);
 }
 
-void Led::flare(SongColor color) {
-  // TODO: Move to 0 first.
-  LedCommand c(Action::FlareToMax, channel_list_[static_cast<int>(color)], 0);
-  xQueueSend(led_queue_, &c, portMAX_DELAY);
+void Led::flare_and_hold(SongColor color) {
+  LedCommand c(Action::FlareToMax, color_to_channel(color), 0);
+  xQueueSend(command_queue_, &c, portMAX_DELAY);
 }
 
 void Led::dim_to_glow(SongColor color) {
-  LedCommand c(Action::DimToGlow, channel_list_[static_cast<int>(color)], 0);
-  xQueueSend(led_queue_, &c, portMAX_DELAY);
+  LedCommand c(Action::DimToGlow, color_to_channel(color), 0);
+  xQueueSend(command_queue_, &c, portMAX_DELAY);
 }
 
 void Led::flare_all_and_follow() {
-  for (auto&& channel : channel_list_) {
-    LedCommand c(Action::FlareToMaxThenDim, channel, 0);
-    xQueueSend(led_queue_, &c, portMAX_DELAY);
+  for (auto&& info : led_info_) {
+    LedCommand c(Action::FlareToMaxThenOff, info.channel, 0);
+    xQueueSend(command_queue_, &c, portMAX_DELAY);
   }
 }
 
@@ -129,18 +128,18 @@ void Led::config_follow_timer() {
 void IRAM_ATTR Led::on_follow_intr(void *param) {
   Led* led = static_cast<Led*>(param);
   // Channel is ignored for SampleRingbuf. All channels are populated.
-  LedCommand c(Action::SampleRingbuf, channel_list_.front(), 0);
-  xQueueSendFromISR(led->led_queue_, &c, 0);
+  LedCommand c(Action::SampleRingbuf, led_info_.front().channel, 0);
+  xQueueSendFromISR(led->command_queue_, &c, 0);
 }
 
 bool Led::on_led_intr(const ledc_cb_param_t *param, void *user_arg) {
   Led* led = static_cast<Led*>(user_arg);
   if (param->event == LEDC_FADE_END_EVT) {
     Action last_action =
-      led->channel_current_action_[param->channel].exchange(Action::Nothing);
-    if (last_action == Action::FlareToMaxThenDim) {
-      LedCommand c(Action::DimToGlow, static_cast<ledc_channel_t>(param->channel), param->duty);
-      xQueueSendFromISR(led->led_queue_, &c, 0);
+      led->current_action_[param->channel].exchange(Action::Nothing);
+    if (last_action == Action::FlareToMaxThenOff) {
+      LedCommand c(Action::DimToOff, static_cast<ledc_channel_t>(param->channel), param->duty);
+      xQueueSendFromISR(led->command_queue_, &c, 0);
       return true;
     }
   }
@@ -149,25 +148,25 @@ bool Led::on_led_intr(const ledc_cb_param_t *param, void *user_arg) {
 
 void Led::flare_channel(ledc_channel_t channel) {
   LedCommand c(Action::FlareToMax, channel, 0);
-  xQueueSend(led_queue_, &c, portMAX_DELAY);
+  xQueueSend(command_queue_, &c, portMAX_DELAY);
 }
 
 void Led::led_task() {
   while(1) {
     LedCommand command;
-    xQueueReceive(led_queue_, &command, portMAX_DELAY);
+    xQueueReceive(command_queue_, &command, portMAX_DELAY);
     if (command.action != Action::SampleRingbuf &&
-        channel_current_action_[command.channel] != Action::Nothing) {
+        current_action_[command.channel] != Action::Nothing) {
       ESP_LOGI(TAG, "Channel %d busy. Skipping command %d",
           command.channel, static_cast<int>(command.action));
       continue;
     }
 
-    channel_current_action_[command.channel] = command.action;
+    current_action_[command.channel] = command.action;
 
     switch (command.action) {
       case Action::FlareToMax:
-      case Action::FlareToMaxThenDim:
+      case Action::FlareToMaxThenOff:
         ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
             kLedcSpeedMode,
             command.channel,
@@ -184,6 +183,16 @@ void Led::led_task() {
             kMaxDuty * kGlowPercentage,
             1,
             15,
+            LEDC_FADE_NO_WAIT));
+      break;
+
+      case Action::DimToOff:
+        ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
+            kLedcSpeedMode,
+            command.channel,
+            0,
+            1,
+            30,
             LEDC_FADE_NO_WAIT));
       break;
 
@@ -230,10 +239,10 @@ void Led::led_task() {
         if (scale != 1) {
           ESP_LOGI(TAG, "s:%d, d:%d, t:%d c:%d r:%d", scale, target_duty - cur_duty_, target_duty, cur_duty_, (kLedcFrequencyHz / kFollowRateHz));
         }
-        for (ledc_channel_t ch : channel_list_) {
+        for (auto&& info : led_info_) {
           ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
                 kLedcSpeedMode,
-                ch,
+                info.channel,
                 target_duty,
                 scale,
                 1,

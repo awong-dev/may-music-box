@@ -130,7 +130,7 @@ void Buttons::process_buttons() {
 
           case ButtonEvent::Down:
             ESP_LOGI(TAG, "Button %d down.", i);
-            led_->flare(color);
+            led_->flare_and_hold(color);
             if (!player_) {
               player_ = std::make_unique<AudioPlayer>(led_->follow_ringbuf(), Led::kFollowRateHz);
             }
