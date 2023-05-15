@@ -74,6 +74,7 @@ Led::Led() {
   for (int i = 0; i < kNumColors; i++) {
     ledc_channel_config_t channel_config = default_channel_config();
     auto& info = led_info_[i];
+    ESP_LOGI(TAG, "Channel i:%d n:%d", i, info.channel);
     channel_config.channel = info.channel;
     channel_config.gpio_num = info.pin;
     ESP_ERROR_CHECK(ledc_channel_config(&channel_config));
@@ -101,6 +102,11 @@ void Led::flare_and_hold(SongColor color) {
 
 void Led::dim_to_glow(SongColor color) {
   LedCommand c(Action::DimToGlow, color_to_channel(color), 0);
+  xQueueSend(command_queue_, &c, portMAX_DELAY);
+}
+
+void Led::off_and_follow(SongColor color) {
+  LedCommand c(Action::OffAndFollow, color_to_channel(color), 0);
   xQueueSend(command_queue_, &c, portMAX_DELAY);
 }
 
@@ -171,17 +177,15 @@ void Led::handle_command(const LedCommand& command) {
     return;
   }
 
-  if (state.is_busy) {
-    send_command(command.action, command.channel, command.current_duty);
-    return;
-  }
+  bool should_skip_fade = state.is_busy;
 
   state.next_action = Action::Nothing;
   state.is_busy = true;
   state.follow_ringbuf = false;
   switch (command.action) {
     case Action::FollowRingbuf:
-      state.is_busy = false;
+      // Preserve prior is_busy state.
+      state.is_busy = should_skip_fade;
       state.follow_ringbuf = true;
       break;
 
@@ -190,6 +194,7 @@ void Led::handle_command(const LedCommand& command) {
       // Fall through.
 
     case Action::FlareToMax:
+      ESP_LOGE(TAG, " flare: %d, f:%d b:%d", command.channel, state.follow_ringbuf, state.is_busy);
       ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
           kLedcSpeedMode,
           command.channel,
@@ -206,6 +211,17 @@ void Led::handle_command(const LedCommand& command) {
           kMaxDuty * kGlowPercentage,
           1,
           100,
+          LEDC_FADE_NO_WAIT));
+      break;
+
+    case Action::OffAndFollow:
+      state.next_action = Action::FollowRingbuf;
+      ESP_ERROR_CHECK(ledc_set_fade_step_and_start(
+          kLedcSpeedMode,
+          command.channel,
+          0,
+          80,
+          1,
           LEDC_FADE_NO_WAIT));
       break;
 
@@ -265,7 +281,9 @@ void Led::handle_broadcast_command(const LedCommand& command) {
       // Calculated degraded duty.
       int target_duty = channel_state_[i].current_duty;
       if (degrade_count % kDegradeSlope == 0) {
-        target_duty = std::max(0, target_duty - 1);
+        if (target_duty > 0) {
+          target_duty--;
+        }
         degrade_count = 0;
       }
 

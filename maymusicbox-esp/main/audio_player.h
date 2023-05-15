@@ -12,6 +12,10 @@ class AudioPlayer {
  public:
   AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate);
   void start_playing(SongColor color);
+  void set_on_play_done(void(*fn)(void* param), void* param) {
+    on_play_done_ = fn;
+    on_play_done_param_ = param;
+  }
 
  private:
   audio_pipeline_handle_t pipeline_ = nullptr;
@@ -20,6 +24,8 @@ class AudioPlayer {
   audio_element_handle_t led_downmix_ = nullptr;
   audio_element_handle_t fatfs_stream_reader_ = nullptr;
   audio_event_iface_handle_t evt_ = nullptr;
+  void (*on_play_done_)(void*) = nullptr;
+  void* on_play_done_param_ = nullptr;
 
   static esp_err_t set_volume(void *obj, int vol);
   static esp_err_t get_volume(void *obj, int* vol);

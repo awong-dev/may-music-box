@@ -76,7 +76,13 @@ void IRAM_ATTR Buttons::on_ulp_interrupt(void* param) {
   wake_incr();
   // Make sure to grab a snapshot to avoid race conditions.
   ButtonState bs = to_bs(ulp_last_button_state);
-  xQueueSendFromISR(static_cast<Buttons*>(param)->button_state_queue_, &bs, NULL);
+  if (xQueueSendFromISR(static_cast<Buttons*>(param)->button_state_queue_, &bs, NULL) == pdFALSE) {
+    wake_dec();
+  }
+}
+
+void Buttons::on_play_done() {
+  led_->off_and_follow(currently_playing_);
 }
 
 // This reads the button state and sends commands until all buttons are
@@ -85,18 +91,20 @@ void Buttons::process_buttons() {
   ButtonState prev_bs = {};
   ButtonState bs = {};
   uint64_t button_down_times[kNumColors] = {};
+  bool is_first = true;
   while (1) {
-    // Read button state and turn into a command. May have just woke.
-    if (xQueueReceive(button_state_queue_, &bs, 500 / portTICK_PERIOD_MS) == pdFALSE) {
+    // Read button state and turn into a command. May have just woke from deep sleep.
+    if (xQueueReceive(button_state_queue_, &bs, 2000 / portTICK_PERIOD_MS) == pdFALSE) {
+      // Synthetically increment the wake counter to balance out the decrement later.
       wake_incr();
-      // No change in state since we timedout. So just signal a status event.
 
+      // No change in state since we timedout. So just signal a status event.
       bs = prev_bs;
     }
     std::array<ButtonEvent,6> events;
     state_to_events(events, prev_bs, bs);
 
-    if (bs != prev_bs) {
+    if (true || bs != prev_bs) {
       ESP_LOGI(TAG, " bs:%02x pbs:%02x 0:%02x 1:%02x 2:%02x 3:%02x 4:%02x 5:%02x\n"
           "    hs0:%08x hs1:%08x hs2:%08x hs3:%08x hs4:%08x hs5:%08x\n"
           "    all_off:%08x",
@@ -118,7 +126,8 @@ void Buttons::process_buttons() {
           );
     }
 
-    if ((ulp_all_off & 0xFFFF) != 1) {
+    if (is_first || (ulp_all_off & 0xFFFF) != 1) {
+      is_first = false;
       for (int i = 0; i < kNumColors; i++) {
         SongColor color = static_cast<SongColor>(i);
         switch (events[i]) {
@@ -133,8 +142,9 @@ void Buttons::process_buttons() {
             led_->flare_and_hold(color);
             if (!player_) {
               player_ = std::make_unique<AudioPlayer>(led_->follow_ringbuf(), Led::kFollowRateHz);
+              player_->set_on_play_done(&Buttons::on_play_done_thunk, this);
             }
-
+            currently_playing_ = color;
             player_->start_playing(color);
             button_down_times[i] = esp_timer_get_time();
             break;

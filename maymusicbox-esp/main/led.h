@@ -15,6 +15,7 @@ class Led {
   Led();
   void flare_and_hold(SongColor color);
   void dim_to_glow(SongColor color);
+  void off_and_follow(SongColor color);
   void flare_all_and_follow();
 
   void print_led_times();
@@ -28,15 +29,20 @@ class Led {
 
  private:
   enum class Action : int {
+    // Special actions.
     Nothing = 0,
     FadeEnd,
 
+    // Broadcast
+    SampleRingbuf,
+
+    // Single color commands.
     FlareToMax,
     FlareToMaxThenOffAndFollow,
     FollowRingbuf,
     DimToOffAndFollow,
     DimToGlow,
-    SampleRingbuf,
+    OffAndFollow,
   };
 
   // Command executed by the main Led Task.  When a command is sent to the Led

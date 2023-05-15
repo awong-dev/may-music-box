@@ -50,25 +50,29 @@ struct ButtonState {
 
 class Buttons {
  public:
-
   explicit Buttons(Led* led);
-
- private:
-  // Pin order follows SongColor int values.
-  static const uint64_t kLongPressUs = 30*1000*1000;
-
-  std::unique_ptr<AudioPlayer> player_;
-  Led* led_;
-
-  QueueHandle_t button_state_queue_ = xQueueCreate(10, sizeof(ButtonState));
-
-  // Impelement the Hackaday debounce method in an interrupt.
-  static void IRAM_ATTR on_ulp_interrupt(void* param);
 
   // This reads the button state and sends commands until all buttons are
   // released.
-  public:
   void process_buttons();
+
+ private:
+  // Pin order follows SongColor int values.
+  static constexpr inline uint64_t kLongPressUs = 30*1000*1000;
+
+  static void IRAM_ATTR on_ulp_interrupt(void* param);
+
+  static void on_play_done_thunk(void* param) {
+    static_cast<Buttons*>(param)->on_play_done();
+  }
+
+  void on_play_done();
+
+  std::unique_ptr<AudioPlayer> player_;
+  Led* led_ = nullptr;
+  SongColor currently_playing_{-1};
+
+  QueueHandle_t button_state_queue_ = xQueueCreate(10, sizeof(ButtonState));
 };
 
 #endif  /* BUTTONS_H_ */

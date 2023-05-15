@@ -180,6 +180,9 @@ void AudioPlayer::pipeline_task() {
         audio_element_state_t el_state = audio_element_get_state(i2s_stream_writer_);
         if (el_state == AEL_STATE_FINISHED) {
           ESP_LOGI(TAG, "[ * ] Finished.");
+          if (on_play_done_) {
+            on_play_done_(on_play_done_param_);
+          }
           wake_set_playing(false);
         }
         continue;
