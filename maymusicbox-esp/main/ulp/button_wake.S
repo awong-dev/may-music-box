@@ -9,6 +9,10 @@
 #define DEBOUNCE_UP ((0xFFFF >> 2) & DEBOUNCE_MASK)
 #define DEBOUNCE_DOWN ((0xFFFF << 14) & DEBOUNCE_MASK)
 
+#define HISTORY_BITS 16
+#define SAMPLE_FULL 16
+#define INCREMENTAL_SAMPLE (SAMPLE_FULL/2)
+
         .global samples_filled
         .bss
 samples_filled:
@@ -49,6 +53,7 @@ debug_r2:
 #define BUTTON_HISTORY_PIN_OFFSET 0
 #define BUTTON_HISTORY_HISTORY_OFFSET 4
 #define BUTTON_HISTORY_ENTRY_WORDS 2
+#define BUTTON_HISTORY_ARRAY_WORDS (6 * BUTTON_HISTORY_ENTRY_WORDS)
         .global button_history
 button_history:
         .global button_history0
@@ -176,17 +181,23 @@ push_history:
         // Move R0 forward to next entry
         ADD R0, R0, BUTTON_HISTORY_ENTRY_WORDS
         SUB R0, R0, button_history
-        JUMPR push_history, 12, LT
+        JUMPR push_history, BUTTON_HISTORY_ARRAY_WORDS, LT
 
         // All histories updated.
         // Increment samples filled counter and calculate button state.
         // Folding button state calculation into previous loop takes
         // too many registers.
-        MOVE R0, samples_filled
-        LD R1, R0, 0
-        ADD R1, R1, 1
-        ST R1, R0, 0
+        MOVE R1, samples_filled
+        LD R0, R1, 0
+        ADD R0, R0, 1
+        ST R0, R1, 0
 
+        // Only attempt to debounce when enough samples
+        // have been collected.
+        JUMPR start_debounce, SAMPLE_FULL, GE
+        HALT
+
+start_debounce:
         MOVE R0, 0
 debounce:
         // set R1 = current history
@@ -240,22 +251,15 @@ debounce_next:
         // Restore and increment R0 by one entry
         ADD R0, R3, BUTTON_HISTORY_ENTRY_WORDS
         SUB R0, R0, button_history
-        JUMPR debounce, 12, LT
+        JUMPR debounce, BUTTON_HISTORY_ARRAY_WORDS, LT
 
-        // Do not allow moving back to stage 0 if there haven't been enough samples.
+        // Reset sample count to 8 so it fills 1/2 the history
+        // bits before publishing again.
         MOVE R0, samples_filled
-        LD R0, R0, 0
-        JUMPR publish_state, 16, GE
-        HALT
-
-publish_state:
-        // Reset sample count to 0 so it takes
-        // 16 more samples to publish a button state.
-        MOVE R0, samples_filled
-        MOVE R1, 0
+        MOVE R1, INCREMENTAL_SAMPLE
         ST R1, R0, 0
 
-        // If all off in tmp_button_state vetor, move back to slow polling. Otherwise send wake.
+        // Mask out the tmp_button_state for publication.
         MOVE R0, tmp_button_state
         LD R0, R0, 0
         AND R0, R0, 0x3F
@@ -264,6 +268,8 @@ publish_state:
         MOVE R1, last_button_state
         ST R0, R1, 0
         WAKE
+
+        // If all off in tmp_button_state vetor, move back to slow polling.
         JUMPR start_slow_poll, 1, LT
         HALT
 

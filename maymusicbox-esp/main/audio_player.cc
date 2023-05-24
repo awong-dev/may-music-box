@@ -36,7 +36,7 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
   i2s_stream_writer_ = i2s_stream_init(&i2s_cfg);
 
   // Setup mp3 decoder.
-  // TODO: Do autodecoder.
+// TODO: Do autodecoder.
   mp3_decoder_cfg_t mp3_cfg = DEFAULT_MP3_DECODER_CONFIG();
   mp3_decoder_ = mp3_decoder_init(&mp3_cfg);
 
@@ -89,8 +89,24 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
 
 void AudioPlayer::start_playing(SongColor color) {
   wake_incr();
-  // TODO: Map color to filename.
-  const char *url = "/sdcard/test.mp3";
+  /*
+  static constexpr std::array kSongs = {
+    "/sdcard/r.mp3",
+    "/sdcard/o.mp3",
+    "/sdcard/y.mp3",
+    "/sdcard/g.mp3",
+    "/sdcard/b.mp3",
+    "/sdcard/p.mp3"
+  };
+  */
+  static constexpr std::array kSongs = {
+    "/sdcard/test.mp3",
+    "/sdcard/test.mp3",
+    "/sdcard/test.mp3",
+    "/sdcard/test.mp3",
+    "/sdcard/test.mp3",
+    "/sdcard/test.mp3"
+  };
         
   esp_err_t ret = ESP_OK;
   ESP_GOTO_ON_ERROR(
@@ -106,7 +122,7 @@ void AudioPlayer::start_playing(SongColor color) {
 
 skip_stopping:
   ESP_GOTO_ON_ERROR(
-      audio_element_set_uri(fatfs_stream_reader_, url),
+      audio_element_set_uri(fatfs_stream_reader_, kSongs[static_cast<int>(color)]),
       skip_playback,
       TAG,
       "URL set failed");

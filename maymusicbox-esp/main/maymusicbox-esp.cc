@@ -101,13 +101,14 @@ extern "C" void app_main(void)
 
   init_ulp();
   if (cause != ESP_SLEEP_WAKEUP_ULP) {
+    ESP_LOGE(TAG, "FULL Reset: %d", cause);
     start_ulp();
     led.flare_all_and_follow();
+    vTaskDelay(500 / portTICK_PERIOD_MS);
 
-    // Sleep right away after first start of ULP. Button history
-    // somehow doesn't record right without it.
+    // Sleep right away after first start of ULP.
     ESP_LOGI(TAG, "Initial sleep");
-    esp_deep_sleep_start();
+    enter_sleep();
   }
 
   mount_sdcard();

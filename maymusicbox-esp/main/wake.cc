@@ -40,8 +40,8 @@ void config_gpio(gpio_num_t gpio, bool pullup_enable, uint32_t* rtc_pin_out) {
 
 void sleep_task(void* param) {
   while (1) {
+    // TODO: This is dumb. Try to sleep right when g_wake_count hits 0. No need for task.
     vTaskDelay(500 / portTICK_PERIOD_MS);
-    // TODO: This is stupid. There should just be one semaphore count.
     if (g_wake_count == 0) {
       enter_sleep();
     }
@@ -107,17 +107,17 @@ void start_ulp() {
         (bin_end - bin_start) / sizeof(uint32_t)));
 
   // slow-poll every 20ms.
-  ESP_ERROR_CHECK(ulp_set_wakeup_period(0, 20 * 1000));
+  static constexpr int kSlowPollMs = 20 * 1000;
+  ESP_ERROR_CHECK(ulp_set_wakeup_period(0, kSlowPollMs));
 
-  // Buttons do 16 samples per 10ms.
-  ESP_ERROR_CHECK(ulp_set_wakeup_period(1, (5 * 1000)/16));
+  // On wake, do 16 samples per half-slow-poll interval.
+  ESP_ERROR_CHECK(ulp_set_wakeup_period(1, kSlowPollMs/16/2));
 
   ESP_ERROR_CHECK(ulp_run(&ulp_entry - RTC_SLOW_MEM));
 }
 
 
 void enter_sleep() {
-  // OTHERWISE HOLD LOCK AND SLEEEEEEEP!!!!
   ESP_LOGE(TAG, "[ EEE ] SLEEPY.");
 
   // Place and hold amp in shutdown.
