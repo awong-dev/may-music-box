@@ -91,12 +91,12 @@ void Buttons::process_buttons() {
   ButtonState prev_bs = {};
   ButtonState bs = {};
   uint64_t button_down_times[kNumColors] = {};
-  bool is_first = true;
   while (1) {
     // Read button state and turn into a command. May have just woke from deep sleep.
-    if (xQueueReceive(button_state_queue_, &bs, 2000 / portTICK_PERIOD_MS) == pdFALSE) {
+    if (xQueueReceive(button_state_queue_, &bs, 100 / portTICK_PERIOD_MS) == pdFALSE) {
       // Synthetically increment the wake counter to balance out the decrement later.
       wake_incr();
+      bs = to_bs(ulp_last_button_state);
 
       // No change in state since we timedout. So just signal a status event.
       bs = prev_bs;
@@ -104,7 +104,7 @@ void Buttons::process_buttons() {
     std::array<ButtonEvent,6> events;
     state_to_events(events, prev_bs, bs);
 
-    if (true || bs != prev_bs) {
+    if (bs != prev_bs) {
       ESP_LOGI(TAG, " bs:%02x pbs:%02x 0:%02x 1:%02x 2:%02x 3:%02x 4:%02x 5:%02x\n"
           "    hs0:%08x hs1:%08x hs2:%08x hs3:%08x hs4:%08x hs5:%08x\n"
           "    all_off:%08x",
@@ -126,67 +126,64 @@ void Buttons::process_buttons() {
           );
     }
 
-    if (is_first || (ulp_all_off & 0xFFFF) != 1) {
-      is_first = false;
-      for (int i = 0; i < kNumColors; i++) {
-        SongColor color = static_cast<SongColor>(i);
-        switch (events[i]) {
-          case ButtonEvent::Up:
-            ESP_LOGI(TAG, "Button %d up.", i);
-            button_down_times[i] = 0;
-            led_->dim_to_glow(color);
-            break;
+    for (int i = 0; i < kNumColors; i++) {
+      SongColor color = static_cast<SongColor>(i);
+      switch (events[i]) {
+        case ButtonEvent::Up:
+          ESP_LOGE(TAG, "Button %d up.", i);
+          button_down_times[i] = 0;
+          led_->dim_to_glow(color);
+          break;
 
-          case ButtonEvent::Down:
-            ESP_LOGI(TAG, "Button %d down.", i);
-            led_->flare_and_hold(color);
-            if (!player_) {
-              player_ = std::make_unique<AudioPlayer>(led_->follow_ringbuf(), Led::kFollowRateHz);
-              player_->set_on_play_done(&Buttons::on_play_done_thunk, this);
-            }
-            currently_playing_ = color;
-            player_->start_playing(color);
-            button_down_times[i] = esp_timer_get_time();
-            break;
+        case ButtonEvent::Down:
+          ESP_LOGE(TAG, "Button %d down.", i);
+          led_->flare_and_hold(color);
+          if (!player_) {
+            player_ = std::make_unique<AudioPlayer>(led_->follow_ringbuf(), Led::kFollowRateHz);
+            player_->set_on_play_done(&Buttons::on_play_done_thunk, this);
+          }
+          currently_playing_ = color;
+          player_->start_playing(color);
+          button_down_times[i] = esp_timer_get_time();
+          break;
 
-          case ButtonEvent::On:
-            if ((esp_timer_get_time() - button_down_times[i]) > kLongPressUs) {
-              // TODO: Flag a long press.
-              ESP_LOGI(TAG, "Button %d long press.", i);
-              ESP_LOGI(TAG, " bs:%02x pbs:%02x 0:%02x 1:%02x 2:%02x 3:%02x 4:%02x 5:%02x\n"
-                  "    hs0:%08x hs1:%08x hs2:%08x hs3:%08x hs4:%08x hs5:%08x\n"
-                  "    all_off:%08x",
-                  *reinterpret_cast<char*>(&bs),
-                  *reinterpret_cast<char*>(&prev_bs),
-                  static_cast<uint32_t>(events[0]),
-                  static_cast<uint32_t>(events[1]),
-                  static_cast<uint32_t>(events[2]),
-                  static_cast<uint32_t>(events[3]),
-                  static_cast<uint32_t>(events[4]),
-                  static_cast<uint32_t>(events[5]),
-                  (&ulp_button_history0)[1],
-                  (&ulp_button_history1)[1],
-                  (&ulp_button_history2)[1],
-                  (&ulp_button_history3)[1],
-                  (&ulp_button_history4)[1],
-                  (&ulp_button_history5)[1],
-                  ulp_all_off
-                  );
-            }
-            break;
+        case ButtonEvent::On:
+          if ((esp_timer_get_time() - button_down_times[i]) > kLongPressUs) {
+            // TODO: Flag a long press.
+            ESP_LOGI(TAG, "Button %d long press.", i);
+            ESP_LOGI(TAG, " bs:%02x pbs:%02x 0:%02x 1:%02x 2:%02x 3:%02x 4:%02x 5:%02x\n"
+                "    hs0:%08x hs1:%08x hs2:%08x hs3:%08x hs4:%08x hs5:%08x\n"
+                "    all_off:%08x",
+                *reinterpret_cast<char*>(&bs),
+                *reinterpret_cast<char*>(&prev_bs),
+                static_cast<uint32_t>(events[0]),
+                static_cast<uint32_t>(events[1]),
+                static_cast<uint32_t>(events[2]),
+                static_cast<uint32_t>(events[3]),
+                static_cast<uint32_t>(events[4]),
+                static_cast<uint32_t>(events[5]),
+                (&ulp_button_history0)[1],
+                (&ulp_button_history1)[1],
+                (&ulp_button_history2)[1],
+                (&ulp_button_history3)[1],
+                (&ulp_button_history4)[1],
+                (&ulp_button_history5)[1],
+                ulp_all_off
+                );
+          }
+          break;
 
-          case ButtonEvent::Off:
-          default:
-            // Don't care.
-            break;
-        }
-        // If multiple down for > 30 seconds, do special commands.
-
-        // 60-second hold of all 6 buttons = "wifi" mode.
-        // 60-second hold of all 3 buttons = "bluetooth pair" mode.
-        // 30-second hold of all 3 buttons = "bluetooth on" mode.
+        case ButtonEvent::Off:
+        default:
+          // Don't care.
+          break;
       }
-    }
+      // If multiple down for > 30 seconds, do special commands.
+
+      // 60-second hold of all 6 buttons = "wifi" mode.
+      // 60-second hold of all 3 buttons = "bluetooth pair" mode.
+      // 30-second hold of all 3 buttons = "bluetooth on" mode.
+  }
 
     prev_bs = bs;
     wake_dec();

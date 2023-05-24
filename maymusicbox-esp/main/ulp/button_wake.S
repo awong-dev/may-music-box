@@ -245,27 +245,21 @@ debounce_next:
         // Do not allow moving back to stage 0 if there haven't been enough samples.
         MOVE R0, samples_filled
         LD R0, R0, 0
-        JUMPR send_wake, 16, LT
+        JUMPR continue_processing, 16, GE
+        WAKE
+        HALT
 
+continue_processing:
         // If all off in tmp_button_state vetor, move back to slow polling. Otherwise send wake.
         MOVE R0, tmp_button_state
         LD R0, R0, 0
         AND R0, R0, 0x3F
-        JUMPR publish_state, 0, GT
 
-        MOVE R0, all_off
-        MOVE R1, 1
-        ST R1, R0, 0
-        JUMP start_slow_poll
-
-publish_state:
         // Publish the button state
         MOVE R1, last_button_state
         ST R0, R1, 0
-
-// Check RTC_CNTL_RDY_FOR_WAKEUP if we start trying to avoid spurious
-// WAKE interrupts on the main processor. For now, just allow the
-// interrupts.
-send_wake:
         WAKE
+        JUMPR start_slow_poll, 1, LT
         HALT
+
+

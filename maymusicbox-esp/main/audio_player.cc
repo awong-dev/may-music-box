@@ -88,7 +88,8 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
 }
 
 void AudioPlayer::start_playing(SongColor color) {
-  wake_set_playing(true);
+  wake_incr();
+  // TODO: Map color to filename.
   const char *url = "/sdcard/test.mp3";
         
   esp_err_t ret = ESP_OK;
@@ -178,12 +179,12 @@ void AudioPlayer::pipeline_task() {
       if (msg.source == (void *) i2s_stream_writer_
           && msg.cmd == AEL_MSG_CMD_REPORT_STATUS) {
         audio_element_state_t el_state = audio_element_get_state(i2s_stream_writer_);
-        if (el_state == AEL_STATE_FINISHED) {
+        if (el_state == AEL_STATE_FINISHED || el_state == AEL_STATE_STOPPED) {
           ESP_LOGI(TAG, "[ * ] Finished.");
           if (on_play_done_) {
             on_play_done_(on_play_done_param_);
           }
-          wake_set_playing(false);
+          wake_dec();
         }
         continue;
       }

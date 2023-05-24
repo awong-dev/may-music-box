@@ -21,7 +21,6 @@
 
 namespace {
 std::atomic_int g_wake_count{};
-bool g_is_playing{};
 
 void config_gpio(gpio_num_t gpio, bool pullup_enable, uint32_t* rtc_pin_out) {
   assert(rtc_gpio_is_valid_gpio(gpio) && "GPIO used for pulse counting must be an RTC IO");
@@ -37,14 +36,11 @@ void config_gpio(gpio_num_t gpio, bool pullup_enable, uint32_t* rtc_pin_out) {
   *rtc_pin_out = rtc_io_number_get(gpio);
 }
 
-QueueHandle_t g_sleep_queue_ = xQueueCreate(1, sizeof(char));
-
 void sleep_task(void* param) {
   while (1) {
-    char dummy;
-    xQueueReceive(g_sleep_queue_, &dummy, portMAX_DELAY);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
     // TODO: This is stupid. There should just be one semaphore count.
-    if (g_wake_count == 0 && g_is_playing == false) {
+    if (g_wake_count == 0) {
       enter_sleep();
     }
   }
@@ -85,7 +81,6 @@ void init_ulp() {
   // suppress boot messages
   esp_deep_sleep_disable_rom_logging();
 
-  g_sleep_queue_ = xQueueCreate(1, sizeof(char));
   xTaskCreate(&sleep_task, "sleep", 4096, NULL, 1, NULL);
 }
 
@@ -133,18 +128,6 @@ void IRAM_ATTR wake_incr() {
   g_wake_count.fetch_add(1);
 }
 
-void wake_set_playing(bool is_playing) {
-  g_is_playing = is_playing;
-  if (!is_playing) {
-    char dummy;
-    xQueueSend(g_sleep_queue_, &dummy, portMAX_DELAY);
-  }
-}
-
 void wake_dec() {
-  if (g_wake_count.fetch_sub(1) == 1) {
-    char dummy;
-    xQueueSend(g_sleep_queue_, &dummy, portMAX_DELAY);
-  }
+  g_wake_count.fetch_sub(1);
 }
-
