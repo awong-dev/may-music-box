@@ -245,11 +245,16 @@ debounce_next:
         // Do not allow moving back to stage 0 if there haven't been enough samples.
         MOVE R0, samples_filled
         LD R0, R0, 0
-        JUMPR continue_processing, 16, GE
-        WAKE
+        JUMPR publish_state, 16, GE
         HALT
 
-continue_processing:
+publish_state:
+        // Reset sample count to 0 so it takes
+        // 16 more samples to publish a button state.
+        MOVE R0, samples_filled
+        MOVE R1, 0
+        ST R1, R0, 0
+
         // If all off in tmp_button_state vetor, move back to slow polling. Otherwise send wake.
         MOVE R0, tmp_button_state
         LD R0, R0, 0
@@ -261,5 +266,4 @@ continue_processing:
         WAKE
         JUMPR start_slow_poll, 1, LT
         HALT
-
 

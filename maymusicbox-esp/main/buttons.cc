@@ -62,10 +62,13 @@ ButtonState IRAM_ATTR to_bs(uint32_t bs_bits) {
 const uint64_t Buttons::kLongPressUs;
 
 Buttons::Buttons(Led* led) : led_(led) {
-  // Fake the first interrupt because that was consumed by waking the entire program.
-  on_ulp_interrupt(this);
-  ESP_LOGI(TAG, "ulp lbs:%08x tbs:%08x debugr0:%08x",
-  ulp_last_button_state, ulp_tmp_button_state, ulp_debug_r0);
+  // Manually insert first message since interrupt was consumed by waking the
+  // entire program. Use the button state captured in the wakeup stub.
+  auto wbs = get_wake_button_state();
+  push_button_state(get_wake_button_state());
+
+  ESP_LOGI(TAG, "ulp wbs:%08x lbs:%08x tbs:%08x debugr0:%08x",
+  wbs, ulp_last_button_state, ulp_tmp_button_state, ulp_debug_r0);
 
   // Register the handler for actual WAKE interrupts from the ULP.
   ESP_ERROR_CHECK(register_button_wake_isr(&Buttons::on_ulp_interrupt, this));
@@ -73,10 +76,14 @@ Buttons::Buttons(Led* led) : led_(led) {
 
 
 void IRAM_ATTR Buttons::on_ulp_interrupt(void* param) {
+  static_cast<Buttons*>(param)->push_button_state(ulp_last_button_state);
+}
+
+void IRAM_ATTR Buttons::push_button_state(uint64_t bs_bits) {
   wake_incr();
   // Make sure to grab a snapshot to avoid race conditions.
-  ButtonState bs = to_bs(ulp_last_button_state);
-  if (xQueueSendFromISR(static_cast<Buttons*>(param)->button_state_queue_, &bs, NULL) == pdFALSE) {
+  ButtonState bs = to_bs(bs_bits);
+  if (xQueueSendFromISR(button_state_queue_, &bs, NULL) == pdFALSE) {
     wake_dec();
   }
 }
@@ -90,16 +97,13 @@ void Buttons::on_play_done() {
 void Buttons::process_buttons() {
   ButtonState prev_bs = {};
   ButtonState bs = {};
-  uint64_t button_down_times[kNumColors] = {};
+  std::array<uint64_t, kNumColors> button_down_times;
   while (1) {
     // Read button state and turn into a command. May have just woke from deep sleep.
     if (xQueueReceive(button_state_queue_, &bs, 100 / portTICK_PERIOD_MS) == pdFALSE) {
       // Synthetically increment the wake counter to balance out the decrement later.
       wake_incr();
       bs = to_bs(ulp_last_button_state);
-
-      // No change in state since we timedout. So just signal a status event.
-      bs = prev_bs;
     }
     std::array<ButtonEvent,6> events;
     state_to_events(events, prev_bs, bs);

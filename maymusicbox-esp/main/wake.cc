@@ -22,6 +22,8 @@
 namespace {
 std::atomic_int g_wake_count{};
 
+RTC_DATA_ATTR uint32_t g_wake_button_state;
+
 void config_gpio(gpio_num_t gpio, bool pullup_enable, uint32_t* rtc_pin_out) {
   assert(rtc_gpio_is_valid_gpio(gpio) && "GPIO used for pulse counting must be an RTC IO");
 
@@ -51,6 +53,17 @@ void sleep_task(void* param) {
 extern const uint8_t bin_start[] asm("_binary_ulp_button_wake_bin_start");
 extern const uint8_t bin_end[]   asm("_binary_ulp_button_wake_bin_end");
 
+// Snapshot the last_button_state right after wake-up since esp-idf boot
+// is slow enough that the button state will be lost.
+extern "C" {
+void RTC_IRAM_ATTR esp_wake_deep_sleep(void) {
+    esp_default_wake_deep_sleep();
+    g_wake_button_state = ulp_last_button_state;
+    static RTC_RODATA_ATTR const char fmt_str[] = "[WAKE] wbs%08x\n\n\n\n\n";
+    esp_rom_printf(fmt_str, g_wake_button_state);
+}
+}
+
 void init_ulp() {
   ESP_LOGE(TAG, "Init ULP");
 
@@ -79,7 +92,9 @@ void init_ulp() {
   ESP_ERROR_CHECK(rtc_gpio_init(GPIO_NUM_4));
 
   // suppress boot messages
-  esp_deep_sleep_disable_rom_logging();
+//  esp_deep_sleep_disable_rom_logging();
+
+  esp_set_deep_sleep_wake_stub(&esp_wake_deep_sleep);
 
   xTaskCreate(&sleep_task, "sleep", 4096, NULL, 1, NULL);
 }
@@ -130,4 +145,8 @@ void IRAM_ATTR wake_incr() {
 
 void wake_dec() {
   g_wake_count.fetch_sub(1);
+}
+
+uint32_t get_wake_button_state() {
+  return g_wake_button_state;
 }

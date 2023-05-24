@@ -8,6 +8,8 @@ void init_ulp();
 void start_ulp();
 void enter_sleep();
 
+uint32_t get_wake_button_state();
+
 void IRAM_ATTR wake_incr();
 void wake_dec();
 
