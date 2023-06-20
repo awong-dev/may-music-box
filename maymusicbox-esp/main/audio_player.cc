@@ -1,6 +1,7 @@
 #include "audio_player.h"
 
 #include <array>
+#include <atomic>
 
 #include "audio_def.h"
 #include "audio_element.h"
@@ -58,7 +59,8 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
   audio_pipeline_register(pipeline_, i2s_stream_writer_, "i2s");
 
   // Link pipeline.
-  static std::array link_tag = {"file", "decoder", "filter", "i2s"};
+  //static std::array link_tag = {"file", "decoder", "filter", "i2s"};
+  static std::array link_tag = {"file", "decoder", "i2s"};
   audio_pipeline_link(pipeline_, &link_tag[0], link_tag.size());
 
   // Enable chip.
@@ -84,12 +86,14 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
   // Set initial volume using I2S ALC.
   i2s_alc_volume_set(i2s_stream_writer_, kDefaultVolume);
 
-  xTaskCreate(&AudioPlayer::pipeline_task_thunk, "pipeline_task", 4096, this, 5, NULL);
+  xTaskCreatePinnedToCore(&AudioPlayer::pipeline_task_thunk, "pipeline_task", 4096, this, 5, NULL, 0);
+
+  // Make the pipeline start all the tasks.
+  audio_pipeline_run(pipeline_);
 }
 
 void AudioPlayer::start_playing(SongColor color) {
   wake_incr();
-  /*
   static constexpr std::array kSongs = {
     "/sdcard/r.mp3",
     "/sdcard/o.mp3",
@@ -97,15 +101,6 @@ void AudioPlayer::start_playing(SongColor color) {
     "/sdcard/g.mp3",
     "/sdcard/b.mp3",
     "/sdcard/p.mp3"
-  };
-  */
-  static constexpr std::array kSongs = {
-    "/sdcard/test.mp3",
-    "/sdcard/test.mp3",
-    "/sdcard/test.mp3",
-    "/sdcard/test.mp3",
-    "/sdcard/test.mp3",
-    "/sdcard/test.mp3"
   };
         
   esp_err_t ret = ESP_OK;
@@ -120,12 +115,6 @@ void AudioPlayer::start_playing(SongColor color) {
       TAG,
       "Unable to stop pipeline");
 
-skip_stopping:
-  ESP_GOTO_ON_ERROR(
-      audio_element_set_uri(fatfs_stream_reader_, kSongs[static_cast<int>(color)]),
-      skip_playback,
-      TAG,
-      "URL set failed");
   ESP_GOTO_ON_ERROR(
       audio_pipeline_reset_ringbuffer(pipeline_),
       skip_playback,
@@ -141,6 +130,13 @@ skip_stopping:
       skip_playback,
       TAG,
       "Unable to move to INIT");
+
+skip_stopping:
+  ESP_GOTO_ON_ERROR(
+      audio_element_set_uri(fatfs_stream_reader_, kSongs[static_cast<int>(color)]),
+      skip_playback,
+      TAG,
+      "URL set failed");
 
   audio_pipeline_run(pipeline_);
   return;
@@ -159,11 +155,9 @@ esp_err_t AudioPlayer::get_volume(void *obj, int* vol) {
 }
 
 void AudioPlayer::pipeline_task() {
-  ESP_LOGI(TAG, "[7.0] Set up  event listener");
   audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
   audio_event_iface_handle_t evt = audio_event_iface_init(&evt_cfg);
 
-  ESP_LOGI(TAG, "[7.1] Listen for all pipeline events");
   audio_pipeline_set_listener(pipeline_, evt);
 
   audio_pipeline_run(pipeline_);
@@ -195,7 +189,7 @@ void AudioPlayer::pipeline_task() {
       if (msg.source == (void *) i2s_stream_writer_
           && msg.cmd == AEL_MSG_CMD_REPORT_STATUS) {
         audio_element_state_t el_state = audio_element_get_state(i2s_stream_writer_);
-        if (el_state == AEL_STATE_FINISHED || el_state == AEL_STATE_STOPPED) {
+        if (el_state == AEL_STATE_FINISHED || el_state == AEL_STATE_STOPPED || el_state == AEL_STATE_ERROR) {
           ESP_LOGI(TAG, "[ * ] Finished.");
           if (on_play_done_) {
             on_play_done_(on_play_done_param_);

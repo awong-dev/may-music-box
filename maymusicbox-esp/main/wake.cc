@@ -96,7 +96,7 @@ void init_ulp() {
 
   esp_set_deep_sleep_wake_stub(&esp_wake_deep_sleep);
 
-  xTaskCreate(&sleep_task, "sleep", 4096, NULL, 1, NULL);
+  xTaskCreatePinnedToCore(&sleep_task, "sleep", 4096, NULL, 1, NULL, 0);
 }
 
 void start_ulp() {

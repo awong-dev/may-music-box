@@ -114,7 +114,7 @@ extern "C" void app_main(void)
   mount_sdcard();
   Buttons buttons(&led);
 
-  xTaskCreate(&run_buttons, "button_task", 4096, &buttons, 5, NULL);
+  xTaskCreatePinnedToCore(&run_buttons, "button_task", 4096, &buttons, 5, NULL, 0);
   while (1) {
     vTaskDelay(portMAX_DELAY);
   }

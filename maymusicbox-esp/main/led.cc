@@ -18,9 +18,9 @@ constexpr int32_t kLedcFrequencyHz = 30000; // Flicker free per Waveform lightin
 constexpr int32_t kMaxDuty = ((1UL << kLedcDutyResolution) - 1);
 
 // How much of MaxDuty should a flare be?
-constexpr float kFlarePercentage = 0.3;
+constexpr float kFlarePercentage = 0.9;
 constexpr int kFlareScale = 80;
-constexpr float kGlowPercentage = 0.02;
+constexpr float kGlowPercentage = 0.7;
 
 ledc_channel_config_t default_channel_config() {
   ledc_channel_config_t channel_config = {};
@@ -92,7 +92,7 @@ Led::Led() {
     ledc_cb_register(kLedcSpeedMode, info.channel, &cbs, this);
   }
   // i2s_stream defaults to priority 23.
-  xTaskCreate(&Led::led_task_thunk, "led_task", 4096, this, 20, NULL);
+  xTaskCreatePinnedToCore(&Led::led_task_thunk, "led_task", 4096, this, 20, NULL, 0);
 }
 
 void Led::flare_and_hold(SongColor color) {
@@ -210,7 +210,7 @@ void Led::handle_command(const LedCommand& command) {
           command.channel,
           kMaxDuty * kGlowPercentage,
           1,
-          100,
+          10,
           LEDC_FADE_NO_WAIT));
       break;
 
@@ -254,13 +254,16 @@ void Led::handle_broadcast_command(const LedCommand& command) {
         f_num_led_values++;
       }
       float percent = s.volume;
-      assert(percent >= 0);
 
-      // TODO: Fix math.
+#define X_FOLLOW 2
+#if X_FOLLOW == 1
       percent = sqrt(percent);
-      // Compress volume range to make LED brigher.
-      percent /= std::numeric_limits<int16_t>::max()/8;
+      percent /= sqrt(std::numeric_limits<int16_t>::max());
+#elif X_FOLLOW == 2
+      percent /= std::numeric_limits<int16_t>::max();
+      percent *= 2;
       percent = std::min(percent, 1.0f);
+#endif
 
       new_duty = kMaxDuty * percent;
     }
@@ -268,7 +271,7 @@ void Led::handle_broadcast_command(const LedCommand& command) {
     // Calculate degraded duty.
     static constexpr int kNumCyclesInSample = (kLedcFrequencyHz / kFollowRateHz);
 
-    static constexpr int kDegradeSlope = 10;
+    static constexpr int kDegradeSlope = 5;  // Smaller is faster.
     static int degrade_count = 0;
     degrade_count++;
 
@@ -282,7 +285,10 @@ void Led::handle_broadcast_command(const LedCommand& command) {
       int target_duty = channel_state_[i].current_duty;
       if (degrade_count % kDegradeSlope == 0) {
         if (target_duty > 0) {
-          target_duty--;
+          //target_duty--;
+          //target_duty *= 0.75;
+          // TODO: Max flare is still slow to return.
+          target_duty -= sqrt(target_duty) / 8 + 1;
         }
         degrade_count = 0;
       }
