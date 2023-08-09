@@ -18,10 +18,6 @@
 namespace {
 const char *TAG = "buttons";
 
-DRAM_ATTR constexpr int kTimerDivider = 16;
-DRAM_ATTR constexpr int kTimerScale = TIMER_BASE_CLK / kTimerDivider;
-DRAM_ATTR constexpr float kTimerInterval = (0.005/32); // 5ms total debounce
-
 ButtonEvent button_state_to_event(bool prev, bool cur) {
   if (prev && cur) {
     return ButtonEvent::On;
@@ -67,7 +63,7 @@ Buttons::Buttons(Led* led) : led_(led) {
   auto wbs = get_wake_button_state();
   push_button_state(get_wake_button_state());
 
-  ESP_LOGI(TAG, "ulp wbs:%08x lbs:%08x tbs:%08x debugr0:%08x",
+  ESP_LOGI(TAG, "ulp wbs:%08lx lbs:%08lx tbs:%08lx debugr0:%08lx",
   wbs, ulp_last_button_state, ulp_tmp_button_state, ulp_debug_r0);
 
   // Register the handler for actual WAKE interrupts from the ULP.
@@ -109,9 +105,9 @@ void Buttons::process_buttons() {
     state_to_events(events, prev_bs, bs);
 
     if (bs != prev_bs) {
-      ESP_LOGI(TAG, " bs:%02x pbs:%02x 0:%02x 1:%02x 2:%02x 3:%02x 4:%02x 5:%02x\n"
-          "    hs0:%08x hs1:%08x hs2:%08x hs3:%08x hs4:%08x hs5:%08x\n"
-          "    all_off:%08x",
+      ESP_LOGI(TAG, " bs:%02x pbs:%02x 0:%02lx 1:%02lx 2:%02lx 3:%02lx 4:%02lx 5:%02lx\n"
+          "    hs0:%08lx hs1:%08lx hs2:%08lx hs3:%08lx hs4:%08lx hs5:%08lx\n"
+          "    all_off:%08lx",
           *reinterpret_cast<char*>(&bs),
           *reinterpret_cast<char*>(&prev_bs),
           static_cast<uint32_t>(events[0]),
@@ -120,12 +116,12 @@ void Buttons::process_buttons() {
           static_cast<uint32_t>(events[3]),
           static_cast<uint32_t>(events[4]),
           static_cast<uint32_t>(events[5]),
-          (&ulp_button_history0)[1],
-          (&ulp_button_history1)[1],
-          (&ulp_button_history2)[1],
-          (&ulp_button_history3)[1],
-          (&ulp_button_history4)[1],
-          (&ulp_button_history5)[1],
+          ulp_button_history0,
+          ulp_button_history1,
+          ulp_button_history2,
+          ulp_button_history3,
+          ulp_button_history4,
+          ulp_button_history5,
           ulp_all_off
           );
     }
@@ -155,9 +151,9 @@ void Buttons::process_buttons() {
           if ((esp_timer_get_time() - button_down_times[i]) > kLongPressUs) {
             // TODO: Flag a long press.
             ESP_LOGI(TAG, "Button %d long press.", i);
-            ESP_LOGI(TAG, " bs:%02x pbs:%02x 0:%02x 1:%02x 2:%02x 3:%02x 4:%02x 5:%02x\n"
-                "    hs0:%08x hs1:%08x hs2:%08x hs3:%08x hs4:%08x hs5:%08x\n"
-                "    all_off:%08x",
+            ESP_LOGI(TAG, " bs:%02x pbs:%02x 0:%02lx 1:%02lx 2:%02lx 3:%02lx 4:%02lx 5:%02lx\n"
+                "    hs0:%08lx hs1:%08lx hs2:%08lx hs3:%08lx hs4:%08lx hs5:%08lx\n"
+                "    all_off:%08lx",
                 *reinterpret_cast<char*>(&bs),
                 *reinterpret_cast<char*>(&prev_bs),
                 static_cast<uint32_t>(events[0]),
@@ -166,12 +162,12 @@ void Buttons::process_buttons() {
                 static_cast<uint32_t>(events[3]),
                 static_cast<uint32_t>(events[4]),
                 static_cast<uint32_t>(events[5]),
-                (&ulp_button_history0)[1],
-                (&ulp_button_history1)[1],
-                (&ulp_button_history2)[1],
-                (&ulp_button_history3)[1],
-                (&ulp_button_history4)[1],
-                (&ulp_button_history5)[1],
+                ulp_button_history0,
+                ulp_button_history1,
+                ulp_button_history2,
+                ulp_button_history3,
+                ulp_button_history4,
+                ulp_button_history5,
                 ulp_all_off
                 );
           }

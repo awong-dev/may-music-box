@@ -34,10 +34,20 @@
 #define PA_ENABLE_GPIO            6     /* You need to define the GPIO pins of your board */
 #define ADC_DETECT_GPIO           7     /* You need to define the GPIO pins of your board */
 #define BATTERY_DETECT_GPIO       8     /* You need to define the GPIO pins of your board */
-#define SDCARD_INTR_GPIO          9     /* You need to define the GPIO pins of your board */
 
 #define SDCARD_OPEN_FILE_NUM_MAX  5
 
+/**
+ * @brief SDCARD Function Definition
+ */
+#define FUNC_SDCARD_EN             (0)
+#define SDCARD_OPEN_FILE_NUM_MAX    5
+#define SDCARD_INTR_GPIO            9     /* You need to define the GPIO pins of your board */
+
+#define ESP_SD_PIN_CLK              -1
+#define ESP_SD_PIN_CMD              -1
+#define ESP_SD_PIN_D0               -1
+#define ESP_SD_PIN_D3               -1
 
 extern audio_hal_func_t AUDIO_NEW_CODEC_DEFAULT_HANDLE;
 

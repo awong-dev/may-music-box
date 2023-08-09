@@ -80,7 +80,7 @@ void init_ulp() {
   config_gpio(GPIO_NUM_35, false, &ulp_button_history3);
   config_gpio(GPIO_NUM_32, true, &ulp_button_history4);
   config_gpio(GPIO_NUM_33, true, &ulp_button_history5);
-  ESP_LOGE(TAG, "rtc io: %d %d %d %d %d %d",
+  ESP_LOGE(TAG, "rtc io: %ld %ld %ld %ld %ld %ld",
       ulp_button_history0,
       ulp_button_history1,
       ulp_button_history2,
@@ -136,10 +136,10 @@ esp_err_t register_button_wake_isr(intr_handler_t fn, void*arg) {
     return ESP_ERR_INVALID_ARG;
   }
   REG_SET_BIT(RTC_CNTL_INT_ENA_REG, RTC_CNTL_ULP_CP_INT_ENA_M);
-  return rtc_isr_register(fn, arg, RTC_CNTL_SAR_INT_ST_M);
+  return rtc_isr_register(fn, arg, RTC_CNTL_SAR_INT_ST_M, RTC_INTR_FLAG_IRAM);
 }
 
-void IRAM_ATTR wake_incr() {
+void wake_incr() {
   g_wake_count.fetch_add(1);
 }
 

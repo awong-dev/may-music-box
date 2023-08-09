@@ -61,7 +61,7 @@ class Buttons {
   static constexpr inline uint64_t kLongPressUs = 30*1000*1000;
 
   static void IRAM_ATTR on_ulp_interrupt(void* param);
-  void IRAM_ATTR push_button_state(uint64_t bs_bits);
+  void push_button_state(uint64_t bs_bits);
 
   static void on_play_done_thunk(void* param) {
     static_cast<Buttons*>(param)->on_play_done();
