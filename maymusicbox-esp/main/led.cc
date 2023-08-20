@@ -11,7 +11,7 @@ static const char *TAG = "led";
 
 namespace {
 
-constexpr ledc_timer_t kLedcTimer= LEDC_TIMER_1;
+constexpr ledc_timer_t kLedcTimer = LEDC_TIMER_1;
 constexpr ledc_mode_t kLedcSpeedMode = LEDC_HIGH_SPEED_MODE;
 constexpr ledc_timer_bit_t kLedcDutyResolution = LEDC_TIMER_11_BIT;
 constexpr int32_t kLedcFrequencyHz = 30000; // Flicker free per Waveform lighting is > 25khz. Use 30khz..

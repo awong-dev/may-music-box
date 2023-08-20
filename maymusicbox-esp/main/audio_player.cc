@@ -93,7 +93,6 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
 }
 
 void AudioPlayer::start_playing(SongColor color) {
-  wake_incr();
   static constexpr std::array kSongs = {
     "/sdcard/r.mp3",
     "/sdcard/o.mp3",
@@ -102,48 +101,18 @@ void AudioPlayer::start_playing(SongColor color) {
     "/sdcard/b.mp3",
     "/sdcard/p.mp3"
   };
+
+  set_wake_until_ms(100);
         
-  esp_err_t ret = ESP_OK;
-  ESP_GOTO_ON_ERROR(
-      audio_pipeline_stop(pipeline_),
-      skip_stopping,
-      TAG,
-      "Failed starting pipeline stop");
-  ESP_GOTO_ON_ERROR(
-      audio_pipeline_wait_for_stop_with_ticks(pipeline_, 1000 / portTICK_PERIOD_MS),
-      skip_stopping,
-      TAG,
-      "Unable to stop pipeline");
+  audio_pipeline_stop(pipeline_);
+  audio_pipeline_wait_for_stop(pipeline_);
+  audio_pipeline_terminate(pipeline_);
 
-  ESP_GOTO_ON_ERROR(
-      audio_pipeline_reset_ringbuffer(pipeline_),
-      skip_playback,
-      TAG,
-      "Unable to reset ringbuffer");
-  ESP_GOTO_ON_ERROR(
-      audio_pipeline_reset_elements(pipeline_),
-      skip_playback,
-      TAG,
-      "Unable to reset elements");
-  ESP_GOTO_ON_ERROR(
-      audio_pipeline_change_state(pipeline_, AEL_STATE_INIT),
-      skip_playback,
-      TAG,
-      "Unable to move to INIT");
-
-skip_stopping:
-  ESP_GOTO_ON_ERROR(
-      audio_element_set_uri(fatfs_stream_reader_, kSongs[static_cast<int>(color)]),
-      skip_playback,
-      TAG,
-      "URL set failed");
+  audio_element_set_uri(fatfs_stream_reader_, kSongs[static_cast<int>(color)]);
+  audio_pipeline_reset_ringbuffer(pipeline_);
+  audio_pipeline_reset_elements(pipeline_);
 
   audio_pipeline_run(pipeline_);
-  return;
-
-skip_playback:
-    ESP_LOGE(TAG, "Skipping play %d", ret);
-    wake_dec();
 }
 
 esp_err_t AudioPlayer::set_volume(void *obj, int vol) {
@@ -178,8 +147,13 @@ void AudioPlayer::pipeline_task() {
           && msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO) {
         audio_element_info_t music_info = {0};
         audio_element_getinfo(mp3_decoder_, &music_info);
-        ESP_LOGI(TAG, "[ * ] Received music info from mp3 decoder, sample_rates=%d, bits=%d, ch=%d",
-            music_info.sample_rates, music_info.bits, music_info.channels);
+        int duration_s = music_info.total_bytes / (music_info.sample_rates * (music_info.bits / 8) * music_info.channels);
+        ESP_LOGI(TAG, "[ * ] Received music info from mp3 decoder, duration=%d, total_bytes: %lld, sample_rates=%d, bits=%d, ch=%d duration: %d",
+            music_info.duration, music_info.total_bytes, music_info.sample_rates, music_info.bits, music_info.channels, duration_s);
+
+        // Wake until 5 seconds after the song ends.
+        set_wake_until_ms((duration_s + 5) * 1000);
+
         led_downmix_setinfo(led_downmix_, music_info.sample_rates, music_info.bits, music_info.channels);
         audio_element_setinfo(i2s_stream_writer_, &music_info);
         ESP_ERROR_CHECK(i2s_stream_set_clk(i2s_stream_writer_, music_info.sample_rates, music_info.bits, music_info.channels));
@@ -194,7 +168,6 @@ void AudioPlayer::pipeline_task() {
           if (on_play_done_) {
             on_play_done_(on_play_done_param_);
           }
-          wake_dec();
         }
         continue;
       }

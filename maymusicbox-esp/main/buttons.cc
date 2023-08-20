@@ -76,12 +76,11 @@ void IRAM_ATTR Buttons::on_ulp_interrupt(void* param) {
 }
 
 void IRAM_ATTR Buttons::push_button_state(uint64_t bs_bits) {
-  wake_incr();
+  // Give 1s for the audio pipeline to sort itself out.
+  set_wake_until_ms(1000);
   // Make sure to grab a snapshot to avoid race conditions.
   ButtonState bs = to_bs(bs_bits);
-  if (xQueueSendFromISR(button_state_queue_, &bs, NULL) == pdFALSE) {
-    wake_dec();
-  }
+  xQueueSendFromISR(button_state_queue_, &bs, NULL);
 }
 
 void Buttons::on_play_done() {
@@ -97,8 +96,6 @@ void Buttons::process_buttons() {
   while (1) {
     // Read button state and turn into a command. May have just woke from deep sleep.
     if (xQueueReceive(button_state_queue_, &bs, 100 / portTICK_PERIOD_MS) == pdFALSE) {
-      // Synthetically increment the wake counter to balance out the decrement later.
-      wake_incr();
       bs = to_bs(ulp_last_button_state);
     }
     std::array<ButtonEvent,6> events;
@@ -186,7 +183,6 @@ void Buttons::process_buttons() {
   }
 
     prev_bs = bs;
-    wake_dec();
   }
 }
 

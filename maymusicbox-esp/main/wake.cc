@@ -18,9 +18,10 @@
 
 #include "logging.h"
 #include "ulp_button_wake.h"
+#include "esp_timer.h"
 
 namespace {
-std::atomic_int g_wake_count{};
+std::atomic_int64_t g_wake_until_ms{};
 
 RTC_DATA_ATTR uint32_t g_wake_button_state;
 
@@ -42,7 +43,8 @@ void sleep_task(void* param) {
   while (1) {
     // TODO: This is dumb. Try to sleep right when g_wake_count hits 0. No need for task.
     vTaskDelay(500 / portTICK_PERIOD_MS);
-    if (g_wake_count == 0) {
+    int64_t now = esp_timer_get_time();
+    if (g_wake_until_ms != 0 && now > g_wake_until_ms) {
       enter_sleep();
     }
   }
@@ -139,12 +141,12 @@ esp_err_t register_button_wake_isr(intr_handler_t fn, void*arg) {
   return rtc_isr_register(fn, arg, RTC_CNTL_SAR_INT_ST_M, RTC_INTR_FLAG_IRAM);
 }
 
-void wake_incr() {
-  g_wake_count.fetch_add(1);
-}
-
-void wake_dec() {
-  g_wake_count.fetch_sub(1);
+void set_wake_until_ms(int64_t from_now_ms) {
+  auto new_wake_until_ms = esp_timer_get_time() + (from_now_ms * 1000);
+  int64_t old_wake = 0;
+  while (old_wake < g_wake_until_ms) {
+    old_wake = g_wake_until_ms.exchange(new_wake_until_ms);
+  }
 }
 
 uint32_t get_wake_button_state() {
