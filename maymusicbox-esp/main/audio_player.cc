@@ -59,8 +59,8 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
   audio_pipeline_register(pipeline_, i2s_stream_writer_, "i2s");
 
   // Link pipeline.
-  //static std::array link_tag = {"file", "decoder", "filter", "i2s"};
-  static std::array link_tag = {"file", "decoder", "i2s"};
+  static std::array link_tag = {"file", "decoder", "filter", "i2s"};
+  //static std::array link_tag = {"file", "decoder", "i2s"};
   audio_pipeline_link(pipeline_, &link_tag[0], link_tag.size());
 
   // Enable chip.
@@ -86,6 +86,7 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
   // Set initial volume using I2S ALC.
   i2s_alc_volume_set(i2s_stream_writer_, kDefaultVolume);
 
+// TODO: This is a threading problem. Multiple tasks handling pipeline_, mp3_decoder_, etc.
   xTaskCreatePinnedToCore(&AudioPlayer::pipeline_task_thunk, "pipeline_task", 4096, this, 5, NULL, 0);
 
   // Make the pipeline start all the tasks.
@@ -93,6 +94,7 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
 }
 
 void AudioPlayer::start_playing(SongColor color) {
+  wake_incr();
   static constexpr std::array kSongs = {
     "/sdcard/r.mp3",
     "/sdcard/o.mp3",
@@ -101,8 +103,6 @@ void AudioPlayer::start_playing(SongColor color) {
     "/sdcard/b.mp3",
     "/sdcard/p.mp3"
   };
-
-  set_wake_until_ms(100);
         
   audio_pipeline_stop(pipeline_);
   audio_pipeline_wait_for_stop(pipeline_);
@@ -129,8 +129,6 @@ void AudioPlayer::pipeline_task() {
 
   audio_pipeline_set_listener(pipeline_, evt);
 
-  audio_pipeline_run(pipeline_);
-
   while (1) {
     /* Handle event interface messages from pipeline
        to set music info and to advance to the next song
@@ -147,13 +145,8 @@ void AudioPlayer::pipeline_task() {
           && msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO) {
         audio_element_info_t music_info = {0};
         audio_element_getinfo(mp3_decoder_, &music_info);
-        int duration_s = music_info.total_bytes / (music_info.sample_rates * (music_info.bits / 8) * music_info.channels);
-        ESP_LOGI(TAG, "[ * ] Received music info from mp3 decoder, duration=%d, total_bytes: %lld, sample_rates=%d, bits=%d, ch=%d duration: %d",
-            music_info.duration, music_info.total_bytes, music_info.sample_rates, music_info.bits, music_info.channels, duration_s);
-
-        // Wake until 5 seconds after the song ends.
-        set_wake_until_ms((duration_s + 5) * 1000);
-
+        ESP_LOGI(TAG, "[ * ] Received music info from mp3 decoder, sample_rates=%d, bits=%d, ch=%d",
+            music_info.sample_rates, music_info.bits, music_info.channels);
         led_downmix_setinfo(led_downmix_, music_info.sample_rates, music_info.bits, music_info.channels);
         audio_element_setinfo(i2s_stream_writer_, &music_info);
         ESP_ERROR_CHECK(i2s_stream_set_clk(i2s_stream_writer_, music_info.sample_rates, music_info.bits, music_info.channels));
@@ -168,6 +161,7 @@ void AudioPlayer::pipeline_task() {
           if (on_play_done_) {
             on_play_done_(on_play_done_param_);
           }
+          wake_dec();
         }
         continue;
       }

@@ -8,6 +8,7 @@
 
 #include "song.h"
 
+#include <atomic>
 #include <memory>
 
 class AudioPlayer;
@@ -71,7 +72,7 @@ class Buttons {
 
   std::unique_ptr<AudioPlayer> player_;
   Led* led_ = nullptr;
-  SongColor currently_playing_{-1};
+  std::atomic<SongColor> currently_playing_{SongColor(-1)};
 
   QueueHandle_t button_state_queue_ = xQueueCreate(10, sizeof(ButtonState));
 };
