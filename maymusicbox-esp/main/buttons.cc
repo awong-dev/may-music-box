@@ -130,13 +130,18 @@ void Buttons::process_buttons() {
       SongColor color = static_cast<SongColor>(i);
       switch (events[i]) {
         case ButtonEvent::Up:
+//          wake_dec();
           ESP_LOGE(TAG, "Button %d up.", i);
           button_down_times[i] = 0;
           led_->dim_to_glow(color);
           break;
 
         case ButtonEvent::Down:
+          wake_incr();
           ESP_LOGE(TAG, "Button %d down.", i);
+          if (currently_playing_ != color && currently_playing_ != SongColor(-1)) {
+            led_->off_and_follow(currently_playing_);
+          }
           led_->flare_and_hold(color);
           if (!player_) {
             player_ = std::make_unique<AudioPlayer>(led_->follow_ringbuf(), Led::kFollowRateHz);

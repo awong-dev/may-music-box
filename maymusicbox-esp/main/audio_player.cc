@@ -147,9 +147,11 @@ void AudioPlayer::pipeline_task() {
         audio_element_getinfo(mp3_decoder_, &music_info);
         ESP_LOGI(TAG, "[ * ] Received music info from mp3 decoder, sample_rates=%d, bits=%d, ch=%d",
             music_info.sample_rates, music_info.bits, music_info.channels);
+
         led_downmix_setinfo(led_downmix_, music_info.sample_rates, music_info.bits, music_info.channels);
         audio_element_setinfo(i2s_stream_writer_, &music_info);
         ESP_ERROR_CHECK(i2s_stream_set_clk(i2s_stream_writer_, music_info.sample_rates, music_info.bits, music_info.channels));
+
         continue;
       }
       // Advance to the next song when previous finishes

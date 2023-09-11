@@ -31,7 +31,7 @@ typedef struct led_downmix {
 } led_downmix_t;
 
 static void setup_led_follow_values(led_downmix_t* led_downmix) {
-  led_downmix->follow_window_frames = led_downmix->samplerate / led_downmix->follow_rate;
+  led_downmix->follow_window_frames = led_downmix->follow_rate;
   led_downmix->follow_window_frames_remainder = led_downmix->samplerate % led_downmix->follow_rate;
   led_downmix->follow_windows_accumulated = 0;
   led_downmix->follow_frames_accumulated = 0;
@@ -137,11 +137,12 @@ static audio_element_err_t led_downmix_process(audio_element_handle_t self, char
       // If a window is complete, write it out and reset.
       if (led_downmix->at_eof || led_downmix->follow_frames_accumulated == frames_to_accumulate) {
         Led::FollowSample s;
-        s.volume = led_downmix->follow_accumulate/2; // Ensure it cannot overflow signed 16.
+        s.volume = led_downmix->follow_accumulate / 2; // Ensure it cannot overflow signed 16.
         if (rb_write(led_downmix->follow_ringbuf,
             reinterpret_cast<char*>(&s),
             sizeof(s),
             0) < sizeof(s)) {
+          ESP_LOGE(TAG, " Ringbuffer full");
         }
         led_downmix->follow_windows_accumulated++;
         led_downmix->follow_accumulate = 0;
@@ -166,6 +167,10 @@ esp_err_t led_downmix_setinfo(audio_element_handle_t self, int rate, int bits, i
   led_downmix->channels = channels;
   setup_led_follow_values(led_downmix);
   led_downmix->at_eof = 0;
+
+  ESP_LOGI(TAG, " Data: SampleRate %d follow_window_frames %lu follow_window_frames_remainder %lu",
+                 led_downmix->samplerate, led_downmix->follow_window_frames, led_downmix->follow_window_frames_remainder);
+
 
   return ESP_OK;
 }

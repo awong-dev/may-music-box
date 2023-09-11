@@ -5,7 +5,7 @@
 
 #include "esp_log.h"
 #include "raw_stream.h"
-#include "driver/timer.h"
+#include "driver/gptimer.h"
 
 static const char *TAG = "led";
 
@@ -15,7 +15,7 @@ constexpr ledc_timer_t kLedcTimer = LEDC_TIMER_1;
 constexpr ledc_mode_t kLedcSpeedMode = LEDC_HIGH_SPEED_MODE;
 constexpr ledc_timer_bit_t kLedcDutyResolution = LEDC_TIMER_11_BIT;
 constexpr int32_t kLedcFrequencyHz = 30000; // Flicker free per Waveform lighting is > 25khz. Use 30khz..
-constexpr int32_t kMaxDuty = ((1UL << kLedcDutyResolution) - 1);
+constexpr int32_t kMaxDuty = ((1UL << kLedcDutyResolution) / 4 - 1);
 
 // How much of MaxDuty should a flare be?
 constexpr float kFlarePercentage = 0.9;
@@ -128,7 +128,7 @@ void Led::config_follow_timer() {
   esp_timer_create(&timer_args, &follow_timer_);
   int64_t rate_us = (1ULL * 10000000)/kFollowRateHz;
   ESP_LOGI(TAG, "Following every %lldus", rate_us);
-  esp_timer_start_periodic(follow_timer_, (1ULL * 1000000)/kFollowRateHz);
+  esp_timer_start_periodic(follow_timer_, rate_us);
 }
 
 void IRAM_ATTR Led::on_follow_intr(void *param) {
@@ -169,26 +169,22 @@ void Led::handle_command(const LedCommand& command) {
        state.is_busy = false;
     }
     return;
+  } else if (command.action == Action::FollowRingbuf) {
+    state.follow_ringbuf = true;
+    return;
   }
 
-  // Reenqueue command if target channel is busy.
+  // Handle broadcast commands.
   if (command.channel == LEDC_CHANNEL_MAX) {
     handle_broadcast_command(command);
     return;
   }
 
-  bool should_skip_fade = state.is_busy;
-
+  // Handle single aciton. This disables following.
   state.next_action = Action::Nothing;
   state.is_busy = true;
   state.follow_ringbuf = false;
   switch (command.action) {
-    case Action::FollowRingbuf:
-      // Preserve prior is_busy state.
-      state.is_busy = should_skip_fade;
-      state.follow_ringbuf = true;
-      break;
-
     case Action::FlareToMaxThenOffAndFollow:
       state.next_action = Action::DimToOffAndFollow;
       // Fall through.
@@ -244,9 +240,8 @@ void Led::handle_command(const LedCommand& command) {
 void Led::handle_broadcast_command(const LedCommand& command) {
   if (command.action == Action::SampleRingbuf) {
     FollowSample s;
-
     int new_duty = -1;
-    if (rb_bytes_available(follow_ringbuf_) >= sizeof(s)) {
+    if (rb_bytes_filled(follow_ringbuf_) >= sizeof(s)) {
       rb_read(follow_ringbuf_, reinterpret_cast<char*>(&s), sizeof(s), 1 / portTICK_PERIOD_MS);
       if (f_num_led_values < f_led_values.size()) {
         f_led_values[f_num_led_values].ts = static_cast<int32_t>(esp_timer_get_time() / 1000);
@@ -255,7 +250,7 @@ void Led::handle_broadcast_command(const LedCommand& command) {
       }
       float percent = s.volume;
 
-#define X_FOLLOW 2
+#define X_FOLLOW 1
 #if X_FOLLOW == 1
       percent = sqrt(percent);
       percent /= sqrt(std::numeric_limits<int16_t>::max());
@@ -271,7 +266,7 @@ void Led::handle_broadcast_command(const LedCommand& command) {
     // Calculate degraded duty.
     static constexpr int kNumCyclesInSample = (kLedcFrequencyHz / kFollowRateHz);
 
-    static constexpr int kDegradeSlope = 5;  // Smaller is faster.
+    static constexpr int kDegradeSlope = 12;  // Smaller is faster.
     static int degrade_count = 0;
     degrade_count++;
 
@@ -286,9 +281,10 @@ void Led::handle_broadcast_command(const LedCommand& command) {
       if (degrade_count % kDegradeSlope == 0) {
         if (target_duty > 0) {
           //target_duty--;
-          //target_duty *= 0.75;
+          //target_duty /= 2;
+          target_duty *= 0.75;
           // TODO: Max flare is still slow to return.
-          target_duty -= sqrt(target_duty) / 8 + 1;
+          //target_duty -= sqrt(target_duty) + 1;
         }
         degrade_count = 0;
       }
