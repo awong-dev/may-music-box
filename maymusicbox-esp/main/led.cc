@@ -15,7 +15,7 @@ constexpr ledc_timer_t kLedcTimer = LEDC_TIMER_1;
 constexpr ledc_mode_t kLedcSpeedMode = LEDC_HIGH_SPEED_MODE;
 constexpr ledc_timer_bit_t kLedcDutyResolution = LEDC_TIMER_11_BIT;
 constexpr int32_t kLedcFrequencyHz = 30000; // Flicker free per Waveform lighting is > 25khz. Use 30khz..
-constexpr int32_t kMaxDuty = ((1UL << kLedcDutyResolution) / 4 - 1);
+constexpr int32_t kMaxDuty = ((1UL << kLedcDutyResolution) / 2 - 1);
 
 // How much of MaxDuty should a flare be?
 constexpr float kFlarePercentage = 0.9;
@@ -170,6 +170,8 @@ void Led::handle_command(const LedCommand& command) {
     }
     return;
   } else if (command.action == Action::FollowRingbuf) {
+    // Set busy state to false as activity has ended.
+    state.is_busy = false;
     state.follow_ringbuf = true;
     return;
   }
@@ -250,15 +252,10 @@ void Led::handle_broadcast_command(const LedCommand& command) {
       }
       float percent = s.volume;
 
-#define X_FOLLOW 1
-#if X_FOLLOW == 1
-      percent = sqrt(percent);
-      percent /= sqrt(std::numeric_limits<int16_t>::max());
-#elif X_FOLLOW == 2
+      // Scale to be prettier.
       percent /= std::numeric_limits<int16_t>::max();
       percent *= 2;
       percent = std::min(percent, 1.0f);
-#endif
 
       new_duty = kMaxDuty * percent;
     }
@@ -266,7 +263,7 @@ void Led::handle_broadcast_command(const LedCommand& command) {
     // Calculate degraded duty.
     static constexpr int kNumCyclesInSample = (kLedcFrequencyHz / kFollowRateHz);
 
-    static constexpr int kDegradeSlope = 12;  // Smaller is faster.
+    static constexpr int kDegradeSlope = 3;  // Smaller is faster.
     static int degrade_count = 0;
     degrade_count++;
 
@@ -282,9 +279,10 @@ void Led::handle_broadcast_command(const LedCommand& command) {
         if (target_duty > 0) {
           //target_duty--;
           //target_duty /= 2;
-          target_duty *= 0.75;
+          //target_duty *= 0.75;
           // TODO: Max flare is still slow to return.
-          //target_duty -= sqrt(target_duty) + 1;
+          target_duty -= sqrt(target_duty) + 1;
+          target_duty = std::max(target_duty, 0);
         }
         degrade_count = 0;
       }

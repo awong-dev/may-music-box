@@ -19,7 +19,7 @@
 #include "wake.h"
 
 namespace {
-constexpr int kDefaultVolume = -10;
+constexpr int kDefaultVolume = -5;  // Smaller is louder.
 }  // namespace
 
 AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {

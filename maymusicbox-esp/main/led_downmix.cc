@@ -25,14 +25,16 @@ typedef struct led_downmix {
   int follow_rate = 0;
   uint32_t follow_window_frames = 0;  // num frames to aggregate into one follow_ringbuf entry
   uint32_t follow_window_frames_remainder = 0;  // left-over from samplerate / follow_rate to ensure sync. This is a hack for 44.1 khz.
+  uint32_t follow_window_frames_rollover = 0;  // num frames to aggregate into one follow_ringbuf entry
   uint32_t follow_windows_accumulated = 0;  // Number of windows that have been sent
   uint32_t follow_frames_accumulated = 0;  // Number of frames accumulated.
-  uint16_t follow_accumulate = 0;
+  float follow_accumulate = 0;
 } led_downmix_t;
 
 static void setup_led_follow_values(led_downmix_t* led_downmix) {
   led_downmix->follow_window_frames = led_downmix->follow_rate;
   led_downmix->follow_window_frames_remainder = led_downmix->samplerate % led_downmix->follow_rate;
+  led_downmix->follow_window_frames_rollover = led_downmix->samplerate / led_downmix->follow_rate;
   led_downmix->follow_windows_accumulated = 0;
   led_downmix->follow_frames_accumulated = 0;
   led_downmix->follow_accumulate = 0;
@@ -125,7 +127,7 @@ static audio_element_err_t led_downmix_process(audio_element_handle_t self, char
     for (int i = 0; i < num_frame_written; ++i) {
       // Write values into the follow_ringbuf.
       int frames_to_accumulate = led_downmix->follow_window_frames;
-      if (led_downmix->follow_windows_accumulated % 10) {
+      if ((led_downmix->follow_windows_accumulated % led_downmix->follow_window_frames_rollover) == 0) {
         frames_to_accumulate += led_downmix->follow_window_frames_remainder;
       }
 
@@ -137,7 +139,7 @@ static audio_element_err_t led_downmix_process(audio_element_handle_t self, char
       // If a window is complete, write it out and reset.
       if (led_downmix->at_eof || led_downmix->follow_frames_accumulated == frames_to_accumulate) {
         Led::FollowSample s;
-        s.volume = led_downmix->follow_accumulate / 2; // Ensure it cannot overflow signed 16.
+        s.volume = static_cast<uint16_t>(led_downmix->follow_accumulate / 2); // Ensure it cannot overflow signed 16.
         if (rb_write(led_downmix->follow_ringbuf,
             reinterpret_cast<char*>(&s),
             sizeof(s),
