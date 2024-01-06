@@ -6,11 +6,11 @@ dependencies:
       type: service
     version: 1.1.0
   espressif/nghttp:
-    component_hash: 713c26854e433e1c70ba8ee6d361220394457cccb0765d8172302e5d660bdc58
+    component_hash: 5e55c2fc982f7ddd257818be86f50d60705f3fd3a39d709c399434e81d458e1e
     source:
       service_url: https://api.components.espressif.com/
       type: service
-    version: 1.52.0
+    version: 1.58.0
   idf:
     component_hash: null
     source:
