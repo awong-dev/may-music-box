@@ -96,12 +96,12 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
 void AudioPlayer::start_playing(SongColor color) {
   wake_incr();
   static constexpr std::array kSongs = {
-    "/sdcard/r.mp3",
-    "/sdcard/o.mp3",
-    "/sdcard/y.mp3",
-    "/sdcard/g.mp3",
-    "/sdcard/b.mp3",
-    "/sdcard/p.mp3"
+    "/sdcard/violin.mp3",
+    "/sdcard/piano.mp3",
+    "/sdcard/french_horn.mp3",
+    "/sdcard/orchestra.mp3",
+    "/sdcard/harp.mp3",
+    "/sdcard/flute.mp3"
   };
         
   audio_pipeline_stop(pipeline_);
