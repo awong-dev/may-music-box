@@ -19,7 +19,7 @@
 #include "wake.h"
 
 namespace {
-constexpr int kDefaultVolume = -5;  // Smaller is louder.
+constexpr int kDefaultVolume = 2;  // Smaller is louder.
 }  // namespace
 
 AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
@@ -30,10 +30,8 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
   mem_assert(pipeline_);
 
   // Setup i2s stream.
-  i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
+  i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT_WITH_PARA(I2S_NUM_0, 44100, I2S_DATA_BIT_WIDTH_16BIT, AUDIO_STREAM_WRITER);
   i2s_cfg.use_alc = true;
-  i2s_cfg.i2s_config.sample_rate = 44100;
-  i2s_cfg.type = AUDIO_STREAM_WRITER;
   i2s_stream_writer_ = i2s_stream_init(&i2s_cfg);
 
   // Setup mp3 decoder.
@@ -85,6 +83,9 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
 
   // Set initial volume using I2S ALC.
   i2s_alc_volume_set(i2s_stream_writer_, kDefaultVolume);
+  int v;
+  i2s_alc_volume_get(i2s_stream_writer_, &v);
+  ESP_LOGI(TAG, "Volume set to %d", v);
 
 // TODO: This is a threading problem. Multiple tasks handling pipeline_, mp3_decoder_, etc.
   xTaskCreatePinnedToCore(&AudioPlayer::pipeline_task_thunk, "pipeline_task", 4096, this, 5, NULL, 0);
@@ -108,7 +109,9 @@ void AudioPlayer::start_playing(SongColor color) {
   audio_pipeline_wait_for_stop(pipeline_);
   audio_pipeline_terminate(pipeline_);
 
-  audio_element_set_uri(fatfs_stream_reader_, kSongs[static_cast<int>(color)]);
+  const auto song = kSongs[static_cast<int>(color)];
+  ESP_LOGI(TAG, "Song: %s", song);
+  audio_element_set_uri(fatfs_stream_reader_, song);
   audio_pipeline_reset_ringbuffer(pipeline_);
   audio_pipeline_reset_elements(pipeline_);
 

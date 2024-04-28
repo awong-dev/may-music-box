@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <math.h>
 
+#include "esp_timer.h"
 #include "esp_log.h"
 #include "raw_stream.h"
 #include "driver/gptimer.h"
@@ -122,7 +123,7 @@ void Led::config_follow_timer() {
   timer_args.callback = &Led::on_follow_intr;
   timer_args.arg = this;
   timer_args.name = "samplerb";
-  timer_args.dispatch_method = ESP_TIMER_ISR;
+  timer_args.dispatch_method = ESP_TIMER_TASK;
   timer_args.skip_unhandled_events = true;
 
   esp_timer_create(&timer_args, &follow_timer_);
