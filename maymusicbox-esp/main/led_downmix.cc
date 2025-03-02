@@ -9,6 +9,7 @@
 #include "led_downmix.h"
 #include "audio_type_def.h"
 #include "led.h"
+#include "wake.h"
 
 static const char *TAG = "LED_DOWNMIX";
 
@@ -82,6 +83,7 @@ static esp_err_t led_downmix_close(audio_element_handle_t self)
 
 static audio_element_err_t led_downmix_process(audio_element_handle_t self, char *in_buffer, int in_len)
 {
+    wake_incr();
     led_downmix_t *led_downmix = (led_downmix_t *)audio_element_getdata(self);
 
     audio_element_err_t r_size = AEL_IO_OK;

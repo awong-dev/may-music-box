@@ -11,7 +11,10 @@
 class AudioPlayer {
  public:
   AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate);
+  void stop_playing();
   void start_playing(SongColor color);
+
+  // Runs on the audio player thread.
   void set_on_play_done(void(*fn)(void* param), void* param) {
     on_play_done_ = fn;
     on_play_done_param_ = param;

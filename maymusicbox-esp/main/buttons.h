@@ -72,7 +72,7 @@ class Buttons {
 
   std::unique_ptr<AudioPlayer> player_;
   Led* led_ = nullptr;
-  std::atomic<SongColor> currently_playing_{SongColor(-1)};
+  std::atomic<SongColor> currently_playing_{SongColor::Invalid};
 
   QueueHandle_t button_state_queue_ = xQueueCreate(10, sizeof(ButtonState));
 };

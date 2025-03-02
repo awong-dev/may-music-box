@@ -106,7 +106,8 @@ extern "C" void app_main(void)
     led.flare_all_and_follow();
     vTaskDelay(500 / portTICK_PERIOD_MS);
 
-    // Sleep right away after first start of ULP.
+    // HACK: Sleep right away after first start of ULP. Otherwise something goes wrong
+    // with the button reading.
     ESP_LOGI(TAG, "Initial sleep");
     enter_sleep();
   }

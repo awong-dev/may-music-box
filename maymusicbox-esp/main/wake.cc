@@ -1,5 +1,7 @@
 #include "wake.h"
 
+#include <time.h>
+
 #include <atomic>
 
 #include "freertos/FreeRTOS.h"
@@ -12,6 +14,7 @@
 #include "driver/rtc_cntl.h"
 #include "driver/rtc_io.h"
 #include "esp_sleep.h"
+#include "esp_timer.h"
 #include "soc/rtc.h"
 #include "soc/rtc_cntl_reg.h"
 #include "ulp_common.h"
@@ -20,9 +23,14 @@
 #include "ulp_button_wake.h"
 
 namespace {
-std::atomic_int g_wake_count{};
+std::atomic_int32_t g_wake_sleep_at{};
+const int ACTION_WAKE_LEASE_MS = 5 * 1000;
 
 RTC_DATA_ATTR uint32_t g_wake_button_state;
+
+int32_t get_time_ms() {
+  return static_cast<int>(esp_timer_get_time() / 1000);
+}
 
 void config_gpio(gpio_num_t gpio, bool pullup_enable, uint32_t* rtc_pin_out) {
   assert(rtc_gpio_is_valid_gpio(gpio) && "GPIO used for pulse counting must be an RTC IO");
@@ -42,7 +50,7 @@ void sleep_task(void* param) {
   while (1) {
     // TODO: This is dumb. Try to sleep right when g_wake_count hits 0. No need for task.
     vTaskDelay(500 / portTICK_PERIOD_MS);
-    if (g_wake_count == 0) {
+    if (get_time_ms() > g_wake_sleep_at) {
       enter_sleep();
     }
   }
@@ -96,6 +104,7 @@ void init_ulp() {
 
   esp_set_deep_sleep_wake_stub(&esp_wake_deep_sleep);
 
+  wake_incr(); // Ensure we don't immediately fall asleep.
   xTaskCreatePinnedToCore(&sleep_task, "sleep", 4096, NULL, 1, NULL, 0);
 }
 
@@ -140,11 +149,7 @@ esp_err_t register_button_wake_isr(intr_handler_t fn, void*arg) {
 }
 
 void wake_incr() {
-  g_wake_count.fetch_add(1);
-}
-
-void wake_dec() {
-  g_wake_count.fetch_sub(1);
+  g_wake_sleep_at = get_time_ms() + ACTION_WAKE_LEASE_MS;
 }
 
 uint32_t get_wake_button_state() {

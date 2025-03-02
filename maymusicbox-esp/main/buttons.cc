@@ -79,9 +79,7 @@ void IRAM_ATTR Buttons::push_button_state(uint64_t bs_bits) {
   wake_incr();
   // Make sure to grab a snapshot to avoid race conditions.
   ButtonState bs = to_bs(bs_bits);
-  if (xQueueSendFromISR(button_state_queue_, &bs, NULL) == pdFALSE) {
-    wake_dec();
-  }
+  xQueueSendFromISR(button_state_queue_, &bs, NULL);
 }
 
 void Buttons::on_play_done() {
@@ -126,29 +124,24 @@ void Buttons::process_buttons() {
           );
     }
 
+    SongColor new_song = SongColor::Invalid;
     for (int i = 0; i < kNumColors; i++) {
       SongColor color = static_cast<SongColor>(i);
       switch (events[i]) {
         case ButtonEvent::Up:
-//          wake_dec();
           ESP_LOGE(TAG, "Button %d up.", i);
           button_down_times[i] = 0;
           led_->dim_to_glow(color);
           break;
 
         case ButtonEvent::Down:
-          wake_incr();
+          // TODO: We have a race here. If multiple buttons are depressed even spuriously,
+          // then we attempt to start_playing multiple times in a row including the
+          // wake_incr().  This is almost certainly going to never terminate. Try executing
+          // the play at the END of the for loop.
           ESP_LOGE(TAG, "Button %d down.", i);
-          if (currently_playing_ != color && currently_playing_ != SongColor(-1)) {
-            led_->off_and_follow(currently_playing_);
-          }
+          new_song = color;
           led_->flare_and_hold(color);
-          if (!player_) {
-            player_ = std::make_unique<AudioPlayer>(led_->follow_ringbuf(), Led::kFollowRateHz);
-            player_->set_on_play_done(&Buttons::on_play_done_thunk, this);
-          }
-          currently_playing_ = color;
-          player_->start_playing(color);
           button_down_times[i] = esp_timer_get_time();
           break;
 
@@ -188,11 +181,28 @@ void Buttons::process_buttons() {
       // 60-second hold of all 6 buttons = "wifi" mode.
       // 60-second hold of all 3 buttons = "bluetooth pair" mode.
       // 30-second hold of all 3 buttons = "bluetooth on" mode.
-  }
+    }
+
+    // Check if there's a new song.
+    if (new_song != SongColor::Invalid) {
+      // Fix the LEDs if we've stopped playing a song.
+      if (currently_playing_ != new_song) {
+        led_->off_and_follow(currently_playing_);
+      }
+
+      // Stop an exisitng player or create a new one.
+      if (player_) {
+        player_->stop_playing();
+      } else {
+        player_ = std::make_unique<AudioPlayer>(led_->follow_ringbuf(), Led::kFollowRateHz);
+        player_->set_on_play_done(&Buttons::on_play_done_thunk, this);
+      }
+
+      // Set new color and start playing.
+      currently_playing_ = new_song;
+      player_->start_playing(new_song);
+    }
 
     prev_bs = bs;
-    wake_dec();
   }
 }
-
-

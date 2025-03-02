@@ -19,7 +19,7 @@
 #include "wake.h"
 
 namespace {
-constexpr int kDefaultVolume = 2;  // Smaller is louder.
+constexpr int kDefaultVolume = -12;  // from -64 to 64.  -64 is very quiet. 64 is max.  -15 seems 
 }  // namespace
 
 AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
@@ -89,9 +89,13 @@ AudioPlayer::AudioPlayer(ringbuf_handle_t follow_ringbuf, int follow_rate) {
 
 // TODO: This is a threading problem. Multiple tasks handling pipeline_, mp3_decoder_, etc.
   xTaskCreatePinnedToCore(&AudioPlayer::pipeline_task_thunk, "pipeline_task", 4096, this, 5, NULL, 0);
+}
 
-  // Make the pipeline start all the tasks.
-  audio_pipeline_run(pipeline_);
+void AudioPlayer::stop_playing() {
+  ESP_LOGI(TAG, "Stopping playback");
+  audio_pipeline_stop(pipeline_);
+  audio_pipeline_wait_for_stop(pipeline_);
+  audio_pipeline_terminate(pipeline_);
 }
 
 void AudioPlayer::start_playing(SongColor color) {
@@ -105,16 +109,10 @@ void AudioPlayer::start_playing(SongColor color) {
     "/sdcard/flute.mp3"
   };
         
-  audio_pipeline_stop(pipeline_);
-  audio_pipeline_wait_for_stop(pipeline_);
-  audio_pipeline_terminate(pipeline_);
-
   const auto song = kSongs[static_cast<int>(color)];
-  ESP_LOGI(TAG, "Song: %s", song);
   audio_element_set_uri(fatfs_stream_reader_, song);
   audio_pipeline_reset_ringbuffer(pipeline_);
   audio_pipeline_reset_elements(pipeline_);
-
   audio_pipeline_run(pipeline_);
 }
 
@@ -166,7 +164,6 @@ void AudioPlayer::pipeline_task() {
           if (on_play_done_) {
             on_play_done_(on_play_done_param_);
           }
-          wake_dec();
         }
         continue;
       }

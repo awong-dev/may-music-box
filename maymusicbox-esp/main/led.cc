@@ -97,18 +97,24 @@ Led::Led() {
 }
 
 void Led::flare_and_hold(SongColor color) {
-  LedCommand c(Action::FlareToMax, color_to_channel(color), 0);
-  xQueueSend(command_queue_, &c, portMAX_DELAY);
+  if (color != SongColor::Invalid) {
+    LedCommand c(Action::FlareToMax, color_to_channel(color), 0);
+    xQueueSend(command_queue_, &c, portMAX_DELAY);
+  }
 }
 
 void Led::dim_to_glow(SongColor color) {
-  LedCommand c(Action::DimToGlow, color_to_channel(color), 0);
-  xQueueSend(command_queue_, &c, portMAX_DELAY);
+  if (color != SongColor::Invalid) {
+    LedCommand c(Action::DimToGlow, color_to_channel(color), 0);
+    xQueueSend(command_queue_, &c, portMAX_DELAY);
+  }
 }
 
 void Led::off_and_follow(SongColor color) {
-  LedCommand c(Action::OffAndFollow, color_to_channel(color), 0);
-  xQueueSend(command_queue_, &c, portMAX_DELAY);
+  if (color != SongColor::Invalid) {
+    LedCommand c(Action::OffAndFollow, color_to_channel(color), 0);
+    xQueueSend(command_queue_, &c, portMAX_DELAY);
+  }
 }
 
 void Led::flare_all_and_follow() {
